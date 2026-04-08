@@ -1,0 +1,498 @@
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800;900&family=Barlow:wght@400;500;600&display=swap');
+
+.page {
+  --red: #d83b34;
+  --navy: #0b1120;
+  --blue: #1d4ed8;
+  --amber: #d97706;
+  --green: #16a34a;
+  --purple: #7c3aed;
+  --border: #e5e7eb;
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --text: #0f172a;
+  --muted: #64748b;
+  --radius: 12px;
+
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  font-family: 'Barlow', system-ui, sans-serif;
+  color: var(--text);
+}
+
+.main {
+  width: min(1440px, 100%);
+  margin: 0 auto;
+  padding: 20px clamp(16px, 2vw, 28px) 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  flex: 1;
+}
+
+.welcomeBanner {
+  background: linear-gradient(135deg, var(--navy) 0%, #1a2540 100%);
+  border-radius: 18px;
+  padding: 24px 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.welcomeH1 {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 800;
+  font-size: 28px;
+  letter-spacing: -0.3px;
+  color: #fff;
+  margin: 0 0 6px;
+  text-transform: uppercase;
+}
+
+.welcomeSub {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.45);
+  margin: 0;
+}
+
+.welcomeActions {
+  display: flex;
+  gap: 10px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.btnPrimary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 20px;
+  background: var(--red);
+  border: none;
+  border-radius: 10px;
+  font-family: 'Barlow', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, transform 0.12s;
+}
+
+.btnPrimary:hover {
+  background: #b42318;
+  transform: translateY(-1px);
+}
+
+.btnSecondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 20px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  font-family: 'Barlow', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.btnSecondary:hover {
+  background: rgba(255, 255, 255, 0.17);
+}
+
+.btnOutline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: transparent;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  font-family: 'Barlow', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.btnOutline:hover {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.statsRow {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+.statCard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 6px;
+  border-left: 4px solid transparent;
+  transition: box-shadow 0.2s, transform 0.15s;
+}
+
+.statCard:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  transform: translateY(-2px);
+}
+
+.statBlue {
+  border-left-color: var(--blue);
+}
+
+.statAmber {
+  border-left-color: var(--amber);
+}
+
+.statGreen {
+  border-left-color: var(--green);
+}
+
+.statPurple {
+  border-left-color: var(--purple);
+}
+
+.statIcon {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.statValue {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 30px;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1;
+}
+
+.statLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 24px;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.sectionTitle {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.2px;
+  color: var(--text);
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.tripsList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tripCard {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 16px;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.tripCard:hover {
+  border-color: #cbd5e1;
+  background: #f1f5f9;
+}
+
+.tripIcon {
+  font-size: 22px;
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+.tripInfo {
+  flex: 1;
+}
+
+.tripCode {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 1px;
+}
+
+.tripDest {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 2px 0;
+}
+
+.tripDates {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.tripRight {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.tripAmount {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.statusBadge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.statusDraft {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.statusSubmitted {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.statusReview {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.statusApproved {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.statusRejected {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.statusReimbursed {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 48px 24px;
+  gap: 10px;
+  text-align: center;
+}
+
+.emptyIcon {
+  font-size: 40px;
+  margin-bottom: 4px;
+}
+
+.emptyTitle {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+
+.emptySub {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+
+.loadingRow {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skeleton {
+  height: 72px;
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+  background-size: 200% 100%;
+  border-radius: 12px;
+  animation: shimmer 1.4s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.quickActions {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.quickGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+
+.quickCard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 4px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.12s;
+}
+
+.quickCard:hover {
+  border-color: var(--red);
+  box-shadow: 0 4px 14px rgba(216, 59, 52, 0.12);
+  transform: translateY(-2px);
+}
+
+.quickIcon {
+  font-size: 24px;
+  display: block;
+  margin-bottom: 6px;
+  line-height: 1;
+}
+
+.quickLabel {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.quickSub {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+@media (max-width: 1024px) {
+  .statsRow {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .quickGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .main {
+    padding: 16px 14px 24px;
+    gap: 16px;
+  }
+
+  .welcomeBanner {
+    padding: 20px;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .statsRow {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  .quickGrid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  .sectionHeader {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .tripCard {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .tripRight {
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 480px) {
+  .main {
+    padding: 12px 12px 20px;
+  }
+
+  .statsRow {
+    grid-template-columns: 1fr;
+  }
+
+  .quickGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .welcomeActions {
+    width: 100%;
+  }
+
+  .btnPrimary,
+  .btnSecondary {
+    flex: 1;
+    justify-content: center;
+  }
+}
