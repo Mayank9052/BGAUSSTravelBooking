@@ -1,0 +1,43 @@
+# ── Visual Studio / .NET ──
+bin/
+obj/
+*.user
+*.suo
+*.vs/
+*.ncrunch*
+*.vscode/
+*.DS_Store
+*.log
+
+# ── NuGet packages
+*.nupkg
+packages/
+*.snupkg
+
+# ── Build outputs
+*.dll
+*.exe
+*.pdb
+*.cache
+*.mdb
+*.appx
+*.appxbundle
+
+# ── JetBrains Rider
+.idea/
+
+# ── Node / Vite / React ──
+node_modules/
+dist/
+.vite/
+.env
+.env.local
+.env.*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.tsbuildinfo
+
+# ── Misc
+*.swp
