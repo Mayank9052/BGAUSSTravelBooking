@@ -95,9 +95,8 @@ export default function DashboardPage() {
   };
 
   const handleSignOut = async () => {
-  await signOut(); // now clears MSAL session + localStorage
-  navigate("/login", { replace: true }); // ensure SPA redirect
-};
+    await signOut();
+  };
 
   return (
     <div className={styles.page}>

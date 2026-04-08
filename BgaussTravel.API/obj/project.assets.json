@@ -2759,23 +2759,23 @@
     ]
   },
   "packageFolders": {
-    "C:\\Users\\priyanka.nikam\\.nuget\\packages\\": {},
+    "C:\\Users\\bg-adm\\.nuget\\packages\\": {},
     "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages": {}
   },
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\priyanka.nikam\\Desktop\\TravelBookingWebApp\\BGAUSSTravelBooking\\BgaussTravel.API\\BgaussTravel.API.csproj",
+      "projectUniqueName": "C:\\Users\\bg-adm\\Desktop\\BgaussTravelBookingProj\\BGAUSSTravelBooking\\BgaussTravel.API\\BgaussTravel.API.csproj",
       "projectName": "BgaussTravel.API",
-      "projectPath": "C:\\Users\\priyanka.nikam\\Desktop\\TravelBookingWebApp\\BGAUSSTravelBooking\\BgaussTravel.API\\BgaussTravel.API.csproj",
-      "packagesPath": "C:\\Users\\priyanka.nikam\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\priyanka.nikam\\Desktop\\TravelBookingWebApp\\BGAUSSTravelBooking\\BgaussTravel.API\\obj\\",
+      "projectPath": "C:\\Users\\bg-adm\\Desktop\\BgaussTravelBookingProj\\BGAUSSTravelBooking\\BgaussTravel.API\\BgaussTravel.API.csproj",
+      "packagesPath": "C:\\Users\\bg-adm\\.nuget\\packages\\",
+      "outputPath": "C:\\Users\\bg-adm\\Desktop\\BgaussTravelBookingProj\\BGAUSSTravelBooking\\BgaussTravel.API\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [
         "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
       ],
       "configFilePaths": [
-        "C:\\Users\\priyanka.nikam\\AppData\\Roaming\\NuGet\\NuGet.Config",
+        "C:\\Users\\bg-adm\\AppData\\Roaming\\NuGet\\NuGet.Config",
         "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
         "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
       ],

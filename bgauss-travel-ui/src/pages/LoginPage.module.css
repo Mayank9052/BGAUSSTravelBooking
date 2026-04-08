@@ -20,11 +20,11 @@
   --text-muted:#64748b;
   --radius:    16px;
 
-  min-height: 100vh;
+  min-height: 100svh;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1.05fr) minmax(420px, 0.95fr);
   font-family: 'Barlow', system-ui, sans-serif;
-  overflow: hidden;
+  overflow: clip;
   background: var(--navy);
 }
 
@@ -37,8 +37,9 @@
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  padding: 48px;
+  padding: clamp(28px, 4vw, 44px);
   overflow: hidden;
+  gap: 24px;
 }
 
 /* Geometric background pattern */
@@ -122,6 +123,7 @@
 .heroBlock {
   position: relative;
   z-index: 1;
+  margin: auto 0;
 }
 
 .heroLabel {
@@ -182,7 +184,7 @@
 .features {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   position: relative;
   z-index: 1;
 }
@@ -191,7 +193,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 16px;
+  padding: 10px 14px;
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.07);
   border-radius: 12px;
@@ -238,8 +240,9 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 56px 64px;
+  padding: clamp(24px, 4vw, 48px);
   position: relative;
+  min-height: 100svh;
 }
 
 /* Subtle top accent bar */
@@ -253,12 +256,17 @@
 
 .formWrap {
   width: 100%;
-  max-width: 380px;
+  max-width: 420px;
+  padding: clamp(20px, 2.5vw, 28px);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 20px;
+  background: rgba(255,255,255,0.94);
+  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.08);
 }
 
 /* ── Form header ── */
 .formHeader {
-  margin-bottom: 36px;
+  margin-bottom: 22px;
 }
 
 .formEyebrow {
@@ -274,7 +282,7 @@
 .formTitle {
   font-family: 'Barlow Condensed', sans-serif;
   font-weight: 800;
-  font-size: 38px;
+  font-size: 34px;
   line-height: 1;
   letter-spacing: -0.5px;
   color: var(--text);
@@ -283,9 +291,9 @@
 }
 
 .formDesc {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--text-muted);
-  line-height: 1.6;
+  line-height: 1.55;
   margin: 0;
 }
 
@@ -298,7 +306,7 @@
   background: #fff5f5;
   border: 1px solid #fecaca;
   border-radius: 10px;
-  margin-bottom: 20px;
+  margin-bottom: 14px;
 }
 
 .errorIcon {
@@ -335,7 +343,7 @@
   transition: background 0.2s, transform 0.15s, box-shadow 0.2s;
   letter-spacing: 0.2px;
   box-shadow: 0 4px 14px rgba(11,17,32,0.25);
-  margin-bottom: 24px;
+  margin-bottom: 10px;
 }
 
 .msBtn:hover:not(:disabled) {
@@ -359,6 +367,13 @@
   flex-shrink: 0;
 }
 
+.signInHint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  margin: 0 0 16px;
+}
+
 /* Spinner */
 .spinner {
   width: 18px;
@@ -377,7 +392,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .dividerLine {
@@ -400,7 +415,7 @@
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   gap: 10px;
-  margin-bottom: 32px;
+  margin-bottom: 18px;
 }
 
 .gridItem {
@@ -436,6 +451,7 @@
   font-size: 11px;
   color: #94a3b8;
   line-height: 1.5;
+  margin: 0;
 }
 
 .footerNote a {
@@ -455,7 +471,7 @@
   background: #f0f9ff;
   border: 1px solid #bae6fd;
   border-radius: 10px;
-  margin-bottom: 20px;
+  margin-bottom: 14px;
 }
 
 .initSpinner {
@@ -480,13 +496,14 @@
 @media (max-width: 900px) {
   .page {
     grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .left {
-    padding: 28px 24px;
+    padding: 22px 20px 14px;
     flex-direction: row;
     align-items: center;
+    justify-content: flex-start;
     gap: 20px;
   }
 
@@ -501,24 +518,32 @@
   .heroH1 { font-size: 28px; }
 
   .right {
-    padding: 40px 24px;
+    justify-content: flex-start;
+    padding: 16px 20px 24px;
+    min-height: auto;
   }
 
   .right::before { display: none; }
 
-  .formWrap { max-width: 100%; }
+  .formWrap {
+    max-width: 100%;
+    padding: 20px 18px;
+    border-radius: 18px;
+  }
 }
 
 @media (max-width: 480px) {
-  .left { padding: 20px 16px; }
+  .left { padding: 18px 16px 12px; }
 
   .brandName { font-size: 18px; }
 
-  .right { padding: 32px 20px; }
+  .right { padding: 12px 16px 20px; }
+
+  .formWrap { padding: 18px 16px; }
 
   .formTitle { font-size: 30px; }
 
-  .grid { grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .grid { grid-template-columns: 1fr 1fr; gap: 8px; }
 
   .gridItem { padding: 10px 6px; }
 }

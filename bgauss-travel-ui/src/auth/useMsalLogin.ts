@@ -5,8 +5,6 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   type AuthenticationResult,
-  type AccountInfo,
-  InteractionRequiredAuthError,
 } from "@azure/msal-browser";
 import { msalInstance, graphScopes } from "./msalConfig";
 
@@ -37,6 +35,20 @@ export interface UseMsalLoginReturn {
   msalReady: boolean;
   error:     string | null;
   user:      MsUser | null;
+}
+
+const APP_SESSION_KEYS = [
+  "jwt_token",
+  "employee_id",
+  "full_name",
+  "email",
+  "role",
+  "employee_code",
+  "department",
+] as const;
+
+function clearAppSession(): void {
+  APP_SESSION_KEYS.forEach((key) => localStorage.removeItem(key));
 }
 
 export function useMsalLogin(
@@ -145,27 +157,8 @@ export function useMsalLogin(
           msalInstance.setActiveAccount(result.account);
           await completeLogin(result);
         } else {
-          // Check if user was already logged in from a previous session
-          const accounts = msalInstance.getAllAccounts();
-          if (accounts.length > 0) {
-            msalInstance.setActiveAccount(accounts[0]);
-
-            // Try to restore session from localStorage
-            const savedToken = localStorage.getItem("jwt_token");
-            if (savedToken) {
-              const savedUser: MsUser = {
-                email:        localStorage.getItem("email")         ?? "",
-                displayName:  localStorage.getItem("full_name")     ?? "",
-                employeeCode: localStorage.getItem("employee_code") ?? "",
-                department:   localStorage.getItem("department")    ?? "",
-                role:         localStorage.getItem("role")          ?? "Employee",
-                employeeId:   Number(localStorage.getItem("employee_id") ?? 0),
-                token:        savedToken,
-              };
-              setUser(savedUser);
-              onSuccess?.(savedUser);
-            }
-          }
+          // Keep the login page visible until the user explicitly signs in.
+          setUser(null);
         }
 
         if (!cancelled) setMsalReady(true);
@@ -200,79 +193,32 @@ export function useMsalLogin(
   const signIn = useCallback((): void => {
     if (!msalReady) return;
     setError(null);
+    setLoading(true);
+    setUser(null);
+    clearAppSession();
 
-    const account: AccountInfo | null =
-      msalInstance.getActiveAccount() ??
-      (msalInstance.getAllAccounts()[0] ?? null);
-
-    if (account) {
-      // Already has an account — try silent token first
-      setLoading(true);
-      msalInstance
-        .acquireTokenSilent({ ...graphScopes, account })
-        .then((r) => completeLogin(r))
-        .catch((e: unknown) => {
-          if (e instanceof InteractionRequiredAuthError) {
-            // Silent failed — need interactive redirect
-            void msalInstance.loginRedirect(graphScopes);
-          } else {
-            const err = e as Error;
-            setError(err.message ?? "Sign-in failed.");
-            setLoading(false);
-          }
-        });
-    } else {
-      // No account — start fresh redirect login
-      void msalInstance.loginRedirect(graphScopes);
-    }
-  }, [msalReady, completeLogin]);
-
-  // ── Sign out ───────────────────────────────────────────────
-  // const signOut = useCallback(async (): Promise<void> => {
-  //   const account = msalInstance.getActiveAccount();
-  //   localStorage.clear();
-  //   sessionStorage.clear();
-  //   setUser(null);
-  //   setError(null);
-  //   if (account) {
-  //     await msalInstance.logoutRedirect({
-  //       account,
-  //       postLogoutRedirectUri: window.location.origin + "/login",
-  //     });
-  //   } else {
-  //     window.location.href = "/login";
-  //   }
-  // }, []);
+    void msalInstance.loginRedirect({
+      ...graphScopes,
+      prompt: "login",
+    }).catch((e: unknown) => {
+      const err = e as Error;
+      setError(err.message ?? "Sign-in failed.");
+      setLoading(false);
+    });
+  }, [msalReady]);
 
   const signOut = useCallback(async (): Promise<void> => {
-  try {
-    // Get active account
-    const account = msalInstance.getActiveAccount();
-
-    // Clear app session
-    localStorage.clear();
-    sessionStorage.clear();
-    setUser(null);
-    setError(null);
-
-    // Clear MSAL active account
-    if (account) msalInstance.setActiveAccount(null);
-
-    // Redirect logout to Microsoft and back to login page
-    if (account) {
-      await msalInstance.logoutRedirect({
-        account,
-        postLogoutRedirectUri: window.location.origin + "/login",
-      });
-    } else {
-      // fallback if no active account
-      window.location.href = "/login";
+    try {
+      clearAppSession();
+      setUser(null);
+      setError(null);
+      msalInstance.setActiveAccount(null);
+    } catch (e: unknown) {
+      console.error("Sign-out failed", e);
+    } finally {
+      window.location.replace("/login");
     }
-  } catch (e: unknown) {
-    console.error("Sign-out failed", e);
-    window.location.href = "/login"; // always redirect
-  }
-}, []);
+  }, []);
 
   return { signIn, signOut, loading, msalReady, error, user };
 }

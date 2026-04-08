@@ -82,7 +82,7 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
             <h2 className={styles.formTitle}>Welcome back</h2>
             <p className={styles.formDesc}>
               Sign in with your BGauss Microsoft 365 account to access
-              travel booking and expense management.
+              travel booking and expense management on any device.
             </p>
           </div>
 
@@ -119,6 +119,10 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
               : <><MicrosoftLogo />Sign in with Microsoft 365</>
             }
           </button>
+
+          <p className={styles.signInHint}>
+            You will be asked for your BGauss email and password each time you sign in.
+          </p>
 
           <div className={styles.divider}>
             <span className={styles.dividerLine} />

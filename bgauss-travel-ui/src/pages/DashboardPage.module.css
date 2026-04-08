@@ -20,7 +20,9 @@
   --muted:    #64748b;
   --radius:   12px;
 
-  min-height: 100vh;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
   background: var(--bg);
   font-family: 'Barlow', system-ui, sans-serif;
   color: var(--text);
@@ -29,11 +31,13 @@
 /* ── NAVBAR ─────────────────────────────────────────────────── */
 .navbar {
   background: var(--navy);
-  height: 64px;
+  min-height: 64px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 28px;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  padding: 12px 24px;
   position: sticky;
   top: 0;
   z-index: 100;
@@ -66,7 +70,11 @@
 
 .navSub { font-size: 10px; color: rgba(255,255,255,0.4); letter-spacing: 0.5px; }
 
-.navLinks { display: flex; gap: 4px; }
+.navLinks {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
 
 .navLink {
   background: none; border: none;
@@ -74,12 +82,18 @@
   font-family: 'Barlow', sans-serif; font-size: 13px; font-weight: 600;
   color: rgba(255,255,255,0.55); cursor: pointer; border-radius: 8px;
   transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
 }
 
 .navLink:hover      { background: rgba(255,255,255,0.07); color: #fff; }
 .navLinkActive      { background: rgba(216,59,52,0.2) !important; color: var(--red) !important; }
 
-.navRight { display: flex; align-items: center; gap: 12px; }
+.navRight {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
 
 .userPill {
   display: flex; align-items: center; gap: 10px;
@@ -115,23 +129,24 @@
 
 /* ── MAIN ───────────────────────────────────────────────────── */
 .main {
-  max-width: 1280px;
+  width: min(1440px, 100%);
   margin: 0 auto;
-  padding: 28px 24px 48px;
+  padding: 20px clamp(16px, 2vw, 28px) 32px;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 18px;
+  flex: 1;
 }
 
 /* ── WELCOME BANNER ─────────────────────────────────────────── */
 .welcomeBanner {
   background: linear-gradient(135deg, var(--navy) 0%, #1a2540 100%);
   border-radius: 18px;
-  padding: 28px 32px;
+  padding: 24px 28px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
+  gap: 16px;
   flex-wrap: wrap;
 }
 
@@ -143,7 +158,12 @@
 
 .welcomeSub { font-size: 13px; color: rgba(255,255,255,0.45); margin: 0; }
 
-.welcomeActions { display: flex; gap: 10px; flex-shrink: 0; }
+.welcomeActions {
+  display: flex;
+  gap: 10px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
 
 /* ── BUTTONS ────────────────────────────────────────────────── */
 .btnPrimary {
@@ -215,7 +235,7 @@
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 18px;
-  padding: 24px;
+  padding: 20px;
 }
 
 .sectionHeader {
@@ -271,7 +291,7 @@
 /* ── EMPTY STATE ────────────────────────────────────────────── */
 .emptyState {
   display: flex; flex-direction: column; align-items: center;
-  padding: 48px 24px; gap: 10px; text-align: center;
+  padding: 36px 20px; gap: 10px; text-align: center;
 }
 
 .emptyIcon  { font-size: 40px; margin-bottom: 4px; }
@@ -330,18 +350,47 @@
 }
 
 @media (max-width: 768px) {
-  .navbar { padding: 0 16px; }
-  .navLinks { display: none; }
-  .main { padding: 16px 14px 40px; gap: 16px; }
+  .navbar {
+    align-items: flex-start;
+    padding: 12px 16px;
+  }
+
+  .navLinks {
+    width: 100%;
+    order: 3;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .navLinks::-webkit-scrollbar { display: none; }
+
+  .main { padding: 16px 14px 24px; gap: 16px; }
   .welcomeBanner { padding: 20px; flex-direction: column; align-items: flex-start; }
   .statsRow  { grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .quickGrid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .userInfo  { display: none; }
+  .sectionHeader {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .tripCard {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .tripRight {
+    align-items: flex-start;
+  }
 }
 
 @media (max-width: 480px) {
-  .statsRow  { grid-template-columns: 1fr 1fr; }
-  .quickGrid { grid-template-columns: 1fr 1fr; }
+  .navbar { padding: 12px; }
+  .main { padding: 12px 12px 20px; }
+  .statsRow  { grid-template-columns: 1fr; }
+  .quickGrid { grid-template-columns: 1fr; }
   .welcomeActions { width: 100%; }
   .btnPrimary, .btnSecondary { flex: 1; justify-content: center; }
+  .userPill { padding-right: 10px; }
 }
