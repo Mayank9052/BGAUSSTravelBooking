@@ -1,94 +1,98 @@
-// src/pages/DashboardPage.tsx
-// BGauss Travel Booking — Employee Dashboard
-// Shows: My Trips | Expense Summary | Pending Approvals | Quick Actions
-
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMsalLogin } from "../auth/useMsalLogin";
+import CommonNavbar from "../components/layout/CommonNavbar";
 import styles from "./DashboardPage.module.css";
 
-// ── Types ──────────────────────────────────────────────────────
 interface TravelRequest {
-  requestId:      number;
-  requestCode:    string;
-  destination:    string;
-  travelPurpose:  string;
-  transportType:  string;
-  status:         string;
-  departureDate:  string;
-  returnDate:     string;
+  requestId: number;
+  requestCode: string;
+  destination: string;
+  transportType: string;
+  status: string;
+  departureDate: string;
+  returnDate: string;
   estimatedAmount?: number;
 }
 
 interface ExpenseSummary {
-  totalPending:    number;
-  totalApproved:   number;
+  totalPending: number;
+  totalApproved: number;
   totalReimbursed: number;
-  pendingCount:    number;
-  approvedCount:   number;
+  pendingCount: number;
+  approvedCount: number;
 }
 
-// ── Helpers ────────────────────────────────────────────────────
 const authHeader = () => ({
   "Content-Type": "application/json",
   Authorization: `Bearer ${localStorage.getItem("jwt_token")}`,
 });
 
 const STATUS_COLORS: Record<string, string> = {
-  Draft:       styles.statusDraft,
-  Submitted:   styles.statusSubmitted,
+  Draft: styles.statusDraft,
+  Submitted: styles.statusSubmitted,
   UnderReview: styles.statusReview,
-  Approved:    styles.statusApproved,
-  Rejected:    styles.statusRejected,
-  Reimbursed:  styles.statusReimbursed,
-  Pending:     styles.statusSubmitted,
+  Approved: styles.statusApproved,
+  Rejected: styles.statusRejected,
+  Reimbursed: styles.statusReimbursed,
+  Pending: styles.statusSubmitted,
 };
 
 const TRANSPORT_ICONS: Record<string, string> = {
-  Flight: "✈️", Train: "🚂", Cab: "🚕", Hotel: "🏨", Multiple: "🔀",
+  Flight: "✈️",
+  Train: "🚂",
+  Cab: "🚕",
+  Hotel: "🏨",
+  Multiple: "🔀",
 };
 
-// ─────────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const navigate = useNavigate();
   const { signOut } = useMsalLogin();
 
-  const fullName    = localStorage.getItem("full_name")     ?? "Employee";
-  const role        = localStorage.getItem("role")          ?? "Employee";
-  const email       = localStorage.getItem("email")         ?? "";
-  const department  = localStorage.getItem("department")    ?? "";
-  const empCode     = localStorage.getItem("employee_code") ?? "";
+  const fullName = localStorage.getItem("full_name") ?? "Employee";
+  const role = localStorage.getItem("role") ?? "Employee";
+  const email = localStorage.getItem("email") ?? "";
+  const department = localStorage.getItem("department") ?? "";
+  const empCode = localStorage.getItem("employee_code") ?? "";
 
-  const initials = fullName.trim().split(" ").filter(Boolean)
-    .map(p => p[0]).slice(0, 2).join("").toUpperCase() || "ME";
+  const initials =
+    fullName
+      .trim()
+      .split(" ")
+      .filter(Boolean)
+      .map((part) => part[0])
+      .slice(0, 2)
+      .join("")
+      .toUpperCase() || "ME";
 
-  const [requests, setRequests]         = useState<TravelRequest[]>([]);
-  const [summary,  setSummary]          = useState<ExpenseSummary | null>(null);
-  const [loading,  setLoading]          = useState(true);
-  const [activeTab,setActiveTab]        = useState<"trips"|"expenses"|"approvals">("trips");
+  const [requests, setRequests] = useState<TravelRequest[]>([]);
+  const [summary, setSummary] = useState<ExpenseSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<"trips" | "expenses" | "approvals">("trips");
 
   useEffect(() => {
-    // Redirect to login if no token
     if (!localStorage.getItem("jwt_token")) {
       navigate("/login", { replace: true });
       return;
     }
-    loadData();
-  }, []); // eslint-disable-line
+    void loadData();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadData = async () => {
     setLoading(true);
     try {
-      // Load travel requests
       const trRes = await fetch("/api/Booking/my", { headers: authHeader() });
-      if (trRes.status === 401) { navigate("/login", { replace: true }); return; }
-      if (trRes.ok) setRequests(await trRes.json() as TravelRequest[]);
+      if (trRes.status === 401) {
+        navigate("/login", { replace: true });
+        return;
+      }
+      if (trRes.ok) setRequests((await trRes.json()) as TravelRequest[]);
 
-      // Load expense summary
       const expRes = await fetch("/api/Expense/summary", { headers: authHeader() });
-      if (expRes.ok) setSummary(await expRes.json() as ExpenseSummary);
+      if (expRes.ok) setSummary((await expRes.json()) as ExpenseSummary);
     } catch {
-      // API may not be running yet — show empty state gracefully
+      // Keep the dashboard usable with empty states if the API is unavailable.
     } finally {
       setLoading(false);
     }
@@ -98,62 +102,40 @@ export default function DashboardPage() {
     await signOut();
   };
 
+  const navItems = [
+    {
+      id: "trips",
+      label: "My Trips",
+      active: activeTab === "trips",
+      onClick: () => setActiveTab("trips"),
+    },
+    {
+      id: "expenses",
+      label: "Expenses",
+      active: activeTab === "expenses",
+      onClick: () => setActiveTab("expenses"),
+    },
+    ...(role === "HR" || role === "Admin"
+      ? [
+          {
+            id: "approvals",
+            label: "Approvals",
+            active: activeTab === "approvals",
+            onClick: () => setActiveTab("approvals"),
+          },
+        ]
+      : []),
+  ];
+
   return (
     <div className={styles.page}>
-
-      {/* ── NAVBAR ── */}
-      <header className={styles.navbar}>
-        <div className={styles.navLeft}>
-          <div className={styles.navLogo}>
-            <div className={styles.navLogoIcon}><span>BG</span></div>
-            <div className={styles.navLogoText}>
-              <span className={styles.navBrand}>BGauss Travel</span>
-              <span className={styles.navSub}>Employee Portal</span>
-            </div>
-          </div>
-        </div>
-        <nav className={styles.navLinks}>
-          <button
-            className={`${styles.navLink} ${activeTab === "trips" ? styles.navLinkActive : ""}`}
-            onClick={() => setActiveTab("trips")}>
-            My Trips
-          </button>
-          <button
-            className={`${styles.navLink} ${activeTab === "expenses" ? styles.navLinkActive : ""}`}
-            onClick={() => setActiveTab("expenses")}>
-            Expenses
-          </button>
-          {(role === "HR" || role === "Admin") && (
-            <button
-              className={`${styles.navLink} ${activeTab === "approvals" ? styles.navLinkActive : ""}`}
-              onClick={() => setActiveTab("approvals")}>
-              Approvals
-            </button>
-          )}
-        </nav>
-        <div className={styles.navRight}>
-          <div className={styles.userPill}>
-            <div className={styles.avatar}>{initials}</div>
-            <div className={styles.userInfo}>
-              <span className={styles.userName}>{fullName}</span>
-              <span className={styles.userRole}>{role}</span>
-            </div>
-          </div>
-          <button className={styles.signOutBtn} onClick={handleSignOut}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-              stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-              <polyline points="16 17 21 12 16 7"/>
-              <line x1="21" y1="12" x2="9" y2="12"/>
-            </svg>
-            Sign out
-          </button>
-        </div>
-      </header>
+      <CommonNavbar
+        navItems={navItems}
+        user={{ initials, name: fullName, subtitle: role }}
+        onSignOut={handleSignOut}
+      />
 
       <main className={styles.main}>
-
-        {/* ── WELCOME BANNER ── */}
         <div className={styles.welcomeBanner}>
           <div className={styles.welcomeText}>
             <h1 className={styles.welcomeH1}>Good day, {fullName.split(" ")[0]} 👋</h1>
@@ -162,18 +144,15 @@ export default function DashboardPage() {
             </p>
           </div>
           <div className={styles.welcomeActions}>
-            <button className={styles.btnPrimary}
-              onClick={() => navigate("/booking/new")}>
+            <button className={styles.btnPrimary} onClick={() => navigate("/booking/new")}>
               + New Travel Request
             </button>
-            <button className={styles.btnSecondary}
-              onClick={() => navigate("/expense/submit")}>
+            <button className={styles.btnSecondary} onClick={() => navigate("/expense/submit")}>
               Submit Expense
             </button>
           </div>
         </div>
 
-        {/* ── SUMMARY CARDS ── */}
         <div className={styles.statsRow}>
           {[
             {
@@ -200,81 +179,67 @@ export default function DashboardPage() {
               icon: "💰",
               color: styles.statPurple,
             },
-          ].map(s => (
-            <div key={s.label} className={`${styles.statCard} ${s.color}`}>
-              <div className={styles.statIcon}>{s.icon}</div>
-              <div className={styles.statValue}>{s.value}</div>
-              <div className={styles.statLabel}>{s.label}</div>
+          ].map((stat) => (
+            <div key={stat.label} className={`${styles.statCard} ${stat.color}`}>
+              <div className={styles.statIcon}>{stat.icon}</div>
+              <div className={styles.statValue}>{stat.value}</div>
+              <div className={styles.statLabel}>{stat.label}</div>
             </div>
           ))}
         </div>
 
-        {/* ── TABS CONTENT ── */}
+        <div className={styles.section}>
+          <div className={styles.sectionHeader}>
+            <h2 className={styles.sectionTitle}>Travel Request List</h2>
+          </div>
 
-        {/* MY TRIPS */}
-        {activeTab === "trips" && (
-          <div className={styles.section}>
-            <div className={styles.sectionHeader}>
-              <h2 className={styles.sectionTitle}>My Travel Requests</h2>
-              <button className={styles.btnOutline}
-                onClick={() => navigate("/booking/new")}>
-                + New Request
-              </button>
+          {loading ? (
+            <div className={styles.loadingRow}>
+              {[1, 2, 3].map((item) => (
+                <div key={item} className={styles.skeleton} />
+              ))}
             </div>
-
-            {loading ? (
-              <div className={styles.loadingRow}>
-                {[1,2,3].map(i => <div key={i} className={styles.skeleton} />)}
-              </div>
-            ) : requests.length === 0 ? (
-              <div className={styles.emptyState}>
-                <div className={styles.emptyIcon}>✈️</div>
-                <p className={styles.emptyTitle}>No travel requests yet</p>
-                <p className={styles.emptySub}>Create your first travel request to get started</p>
-                <button className={styles.btnPrimary}
-                  onClick={() => navigate("/booking/new")}>
-                  + New Travel Request
-                </button>
-              </div>
-            ) : (
-              <div className={styles.tripsList}>
-                {requests.map(r => (
-                  <div key={r.requestId} className={styles.tripCard}>
-                    <div className={styles.tripIcon}>
-                      {TRANSPORT_ICONS[r.transportType] ?? "🚗"}
-                    </div>
-                    <div className={styles.tripInfo}>
-                      <div className={styles.tripCode}>{r.requestCode}</div>
-                      <div className={styles.tripDest}>{r.destination}</div>
-                      <div className={styles.tripDates}>
-                        {r.departureDate} → {r.returnDate}
-                      </div>
-                      <div className={styles.tripPurpose}>{r.travelPurpose}</div>
-                    </div>
-                    <div className={styles.tripRight}>
-                      <span className={`${styles.statusBadge} ${STATUS_COLORS[r.status] ?? ""}`}>
-                        {r.status}
-                      </span>
-                      {r.estimatedAmount != null && (
-                        <div className={styles.tripAmount}>
-                          ₹{r.estimatedAmount.toLocaleString("en-IN")}
-                        </div>
-                      )}
+          ) : requests.length === 0 ? (
+            <div className={styles.emptyState}>
+              <div className={styles.emptyIcon}>✈️</div>
+              <p className={styles.emptyTitle}>No travel requests yet</p>
+              <p className={styles.emptySub}>Create your first travel request to get started</p>
+            </div>
+          ) : (
+            <div className={styles.tripsList}>
+              {requests.map((request) => (
+                <div key={request.requestId} className={styles.tripCard}>
+                  <div className={styles.tripIcon}>
+                    {TRANSPORT_ICONS[request.transportType] ?? "🚗"}
+                  </div>
+                  <div className={styles.tripInfo}>
+                    <div className={styles.tripCode}>{request.requestCode}</div>
+                    <div className={styles.tripDest}>{request.destination}</div>
+                    <div className={styles.tripDates}>
+                      {request.departureDate} → {request.returnDate}
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+                  <div className={styles.tripRight}>
+                    <span className={`${styles.statusBadge} ${STATUS_COLORS[request.status] ?? ""}`}>
+                      {request.status}
+                    </span>
+                    {request.estimatedAmount != null && (
+                      <div className={styles.tripAmount}>
+                        ₹{request.estimatedAmount.toLocaleString("en-IN")}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
-        {/* EXPENSES */}
         {activeTab === "expenses" && (
           <div className={styles.section}>
             <div className={styles.sectionHeader}>
               <h2 className={styles.sectionTitle}>Expense Claims</h2>
-              <button className={styles.btnOutline}
-                onClick={() => navigate("/expense/submit")}>
+              <button className={styles.btnOutline} onClick={() => navigate("/expense/submit")}>
                 + Submit Expense
               </button>
             </div>
@@ -284,15 +249,13 @@ export default function DashboardPage() {
               <p className={styles.emptySub}>
                 Upload bills and track reimbursements for your travel expenses.
               </p>
-              <button className={styles.btnPrimary}
-                onClick={() => navigate("/expense/submit")}>
+              <button className={styles.btnPrimary} onClick={() => navigate("/expense/submit")}>
                 Submit New Expense
               </button>
             </div>
           </div>
         )}
 
-        {/* APPROVALS (HR/Admin only) */}
         {activeTab === "approvals" && (
           <div className={styles.section}>
             <div className={styles.sectionHeader}>
@@ -308,27 +271,30 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* ── QUICK ACTIONS ── */}
         <div className={styles.quickActions}>
           <h2 className={styles.sectionTitle}>Quick Actions</h2>
           <div className={styles.quickGrid}>
             {[
-              { icon: "✈️", label: "Book Travel",       sub: "New travel request",     path: "/booking/new"    },
-              { icon: "🧾", label: "Submit Expense",    sub: "Upload a bill",           path: "/expense/submit" },
-              { icon: "📊", label: "View Reports",      sub: "Download expense report", path: "/reports"        },
-              { icon: "👤", label: "My Profile",        sub: "Account details",         path: "/profile"        },
-            ].map(q => (
-              <div key={q.label} className={styles.quickCard}
-                onClick={() => navigate(q.path)} role="button" tabIndex={0}
-                onKeyDown={e => e.key === "Enter" && navigate(q.path)}>
-                <span className={styles.quickIcon}>{q.icon}</span>
-                <span className={styles.quickLabel}>{q.label}</span>
-                <span className={styles.quickSub}>{q.sub}</span>
+              { icon: "✈️", label: "Book Travel", sub: "New travel request", path: "/booking/new" },
+              { icon: "🧾", label: "Submit Expense", sub: "Upload a bill", path: "/expense/submit" },
+              { icon: "📊", label: "View Reports", sub: "Download expense report", path: "/reports" },
+              { icon: "👤", label: "My Profile", sub: "Account details", path: "/profile" },
+            ].map((quickAction) => (
+              <div
+                key={quickAction.label}
+                className={styles.quickCard}
+                onClick={() => navigate(quickAction.path)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(event) => event.key === "Enter" && navigate(quickAction.path)}
+              >
+                <span className={styles.quickIcon}>{quickAction.icon}</span>
+                <span className={styles.quickLabel}>{quickAction.label}</span>
+                <span className={styles.quickSub}>{quickAction.sub}</span>
               </div>
             ))}
           </div>
         </div>
-
       </main>
     </div>
   );

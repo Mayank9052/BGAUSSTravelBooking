@@ -9,6 +9,8 @@ import { MsalProvider } from "@azure/msal-react";
 import { msalInstance } from "./auth/msalConfig";
 import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
+import TravelRequestOptionsPage from "./pages/TravelRequestOptionsPage";
+import TravelRequestFormPage from "./pages/TravelRequestFormPage";
 import type { MsUser } from "./auth/useMsalLogin";
 import "./index.css";
 import PrivateRoute from "./components/PrivateRoute";
@@ -56,6 +58,22 @@ msalInstance.initialize().then(() => {
               element={
                 <PrivateRoute>
                   <DashboardPage />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/booking/new"
+              element={
+                <PrivateRoute>
+                  <TravelRequestOptionsPage />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/booking/new/:requestType"
+              element={
+                <PrivateRoute>
+                  <TravelRequestFormPage />
                 </PrivateRoute>
               }
             />
