@@ -1,6 +1,6 @@
 import { Navigate, useNavigate, useParams } from "react-router-dom";
-import { useMsalLogin } from "../auth/useMsalLogin";
-import CommonNavbar from "../components/layout/CommonNavbar";
+import { useMsalLogin } from "../../auth/useMsalLogin";
+import CommonNavbar from "../../components/layout/CommonNavbar";
 import styles from "./TravelRequestFormPage.module.css";
 
 const REQUEST_PAGE_CONFIG = {

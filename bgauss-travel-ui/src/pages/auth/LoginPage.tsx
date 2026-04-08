@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { useMsalLogin, type MsUser } from "../auth/useMsalLogin";
-import CommonNavbar from "../components/layout/CommonNavbar";
+import { useMsalLogin, type MsUser } from "../../auth/useMsalLogin";
+import CommonNavbar from "../../components/layout/CommonNavbar";
 import styles from "./LoginPage.module.css";
 
 interface LoginPageProps {

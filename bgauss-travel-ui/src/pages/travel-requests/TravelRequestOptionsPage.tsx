@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useMsalLogin } from "../auth/useMsalLogin";
-import CommonNavbar from "../components/layout/CommonNavbar";
+import { useMsalLogin } from "../../auth/useMsalLogin";
+import CommonNavbar from "../../components/layout/CommonNavbar";
 import styles from "./TravelRequestOptionsPage.module.css";
 
 const REQUEST_OPTIONS = [
