@@ -1,23 +1,23 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\bg-adm\\Desktop\\BGAUSSTravelBooking App\\BgaussTravel.API\\BgaussTravel.API.csproj": {}
+    "C:\\Users\\priyanka.nikam\\Desktop\\TravelBookingWebApp\\BGAUSSTravelBooking\\BgaussTravel.API\\BgaussTravel.API.csproj": {}
   },
   "projects": {
-    "C:\\Users\\bg-adm\\Desktop\\BGAUSSTravelBooking App\\BgaussTravel.API\\BgaussTravel.API.csproj": {
+    "C:\\Users\\priyanka.nikam\\Desktop\\TravelBookingWebApp\\BGAUSSTravelBooking\\BgaussTravel.API\\BgaussTravel.API.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\bg-adm\\Desktop\\BGAUSSTravelBooking App\\BgaussTravel.API\\BgaussTravel.API.csproj",
+        "projectUniqueName": "C:\\Users\\priyanka.nikam\\Desktop\\TravelBookingWebApp\\BGAUSSTravelBooking\\BgaussTravel.API\\BgaussTravel.API.csproj",
         "projectName": "BgaussTravel.API",
-        "projectPath": "C:\\Users\\bg-adm\\Desktop\\BGAUSSTravelBooking App\\BgaussTravel.API\\BgaussTravel.API.csproj",
-        "packagesPath": "C:\\Users\\bg-adm\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\bg-adm\\Desktop\\BGAUSSTravelBooking App\\BgaussTravel.API\\obj\\",
+        "projectPath": "C:\\Users\\priyanka.nikam\\Desktop\\TravelBookingWebApp\\BGAUSSTravelBooking\\BgaussTravel.API\\BgaussTravel.API.csproj",
+        "packagesPath": "C:\\Users\\priyanka.nikam\\.nuget\\packages\\",
+        "outputPath": "C:\\Users\\priyanka.nikam\\Desktop\\TravelBookingWebApp\\BGAUSSTravelBooking\\BgaussTravel.API\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
         ],
         "configFilePaths": [
-          "C:\\Users\\bg-adm\\AppData\\Roaming\\NuGet\\NuGet.Config",
+          "C:\\Users\\priyanka.nikam\\AppData\\Roaming\\NuGet\\NuGet.Config",
           "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
           "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
         ],
@@ -51,9 +51,45 @@
         "net10.0": {
           "targetAlias": "net10.0",
           "dependencies": {
+            "Azure.Identity": {
+              "target": "Package",
+              "version": "[1.14.2, )"
+            },
+            "Microsoft.AspNetCore.Authentication.JwtBearer": {
+              "target": "Package",
+              "version": "[10.0.5, )"
+            },
             "Microsoft.AspNetCore.OpenApi": {
               "target": "Package",
               "version": "[10.0.5, )"
+            },
+            "Microsoft.Data.SqlClient": {
+              "target": "Package",
+              "version": "[6.1.1, )"
+            },
+            "Microsoft.EntityFrameworkCore.Design": {
+              "include": "Runtime, Build, Native, ContentFiles, Analyzers, BuildTransitive",
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[8.0.0, )"
+            },
+            "Microsoft.EntityFrameworkCore.SqlServer": {
+              "target": "Package",
+              "version": "[8.0.0, )"
+            },
+            "Microsoft.EntityFrameworkCore.Tools": {
+              "include": "Runtime, Build, Native, ContentFiles, Analyzers, BuildTransitive",
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[8.0.0, )"
+            },
+            "Microsoft.IdentityModel.Tokens": {
+              "target": "Package",
+              "version": "[8.17.0, )"
+            },
+            "Swashbuckle.AspNetCore": {
+              "target": "Package",
+              "version": "[10.0.1, )"
             }
           },
           "imports": [
