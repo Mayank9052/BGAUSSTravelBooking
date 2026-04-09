@@ -31,11 +31,15 @@ export default function LoginPage({ onSuccess }: LoginPageProps) {
     navigate("/dashboard", { replace: true });
   };
 
-  const { signIn, loading, error, msalReady, user } = useMsalLogin(handleSuccess);
+  const { signIn, loading, error, msalReady} = useMsalLogin(handleSuccess);
 
   useEffect(() => {
-    if (user) navigate("/dashboard", { replace: true });
-  }, [user, navigate]);
+    const token = localStorage.getItem("jwt_token");
+
+    if (token) {
+      navigate("/dashboard", { replace: true });
+    }
+  }, [navigate]);
 
   return (
     <div className={styles.page}>

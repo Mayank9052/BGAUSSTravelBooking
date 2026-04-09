@@ -1,24 +1,20 @@
 // src/auth/useMsalLogin.ts
-// Uses loginRedirect (not loginPopup) — required for SPA redirect flow
-// Handles the redirect result on page load via handleRedirectPromise()
 
 import { useState, useEffect, useCallback } from "react";
-import {
-  type AuthenticationResult,
-} from "@azure/msal-browser";
+import { type AuthenticationResult } from "@azure/msal-browser";
 import { msalInstance, graphScopes } from "./msalConfig";
 
 export interface MsUser {
-  email:        string;
-  displayName:  string;
-  employeeCode: string;
-  department:   string;
-  designation?: string;
+  email:             string;
+  displayName:       string;
+  employeeCode:      string;
+  department:        string;
+  designation?:      string;
   reportingManager?: string;
-  contactNumber?: string;
-  role:         string;
-  employeeId:   number;
-  token:        string;
+  contactNumber?:    string;
+  role:              string;
+  employeeId:        number;
+  token:             string;
 }
 
 interface MsLoginApiResponse {
@@ -32,12 +28,13 @@ interface MsLoginApiResponse {
 }
 
 export interface UseMsalLoginReturn {
-  signIn:    () => void;
-  signOut:   () => Promise<void>;
-  loading:   boolean;
-  msalReady: boolean;
-  error:     string | null;
-  user:      MsUser | null;
+  signIn:         () => void;
+  signOut:        () => Promise<void>;
+  loading:        boolean;
+  msalReady:      boolean;
+  isInitializing: boolean;  // ✅ in interface
+  error:          string | null;
+  user:           MsUser | null;
 }
 
 const APP_SESSION_KEYS = [
@@ -60,21 +57,22 @@ function clearAppSession(): void {
 export function useMsalLogin(
   onSuccess?: (user: MsUser) => void
 ): UseMsalLoginReturn {
-  const [loading,   setLoading]   = useState(false);
-  const [msalReady, setMsalReady] = useState(false);
-  const [error,     setError]     = useState<string | null>(null);
-  const [user,      setUser]      = useState<MsUser | null>(null);
+  // ✅ ALL useState calls must be INSIDE the hook function
+  const [loading,        setLoading]        = useState(false);
+  const [msalReady,      setMsalReady]      = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true);  // ✅ moved inside
+  const [error,          setError]          = useState<string | null>(null);
+  const [user,           setUser]           = useState<MsUser | null>(null);
 
-  // Called after MSAL redirect returns with a token
   const completeLogin = useCallback(async (
     result: AuthenticationResult
   ): Promise<void> => {
     setLoading(true);
     setError(null);
+
     try {
       const msToken = result.accessToken;
 
-      // Fetch full profile from Microsoft Graph
       const graphRes = await fetch(
         "https://graph.microsoft.com/v1.0/me?$select=displayName,mail,userPrincipalName,department,employeeId,jobTitle,mobilePhone,businessPhones",
         { headers: { Authorization: `Bearer ${msToken}` } }
@@ -83,75 +81,37 @@ export function useMsalLogin(
       if (!graphRes.ok)
         throw new Error(`Microsoft Graph error: ${graphRes.status}`);
 
-      const profile = await graphRes.json() as {
-        displayName?: string | null;
-        mail?: string | null;
-        userPrincipalName?: string | null;
-        department?: string | null;
-        employeeId?: string | null;
-        jobTitle?: string | null;
-        mobilePhone?: string | null;
-        businessPhones?: string[] | null;
-      };
+      const profile = await graphRes.json();
 
       const email = (profile.mail ?? profile.userPrincipalName ?? "").toLowerCase().trim();
-      const displayName = profile.displayName ?? email;
-      const department = profile.department ?? "";
-      const employeeCode = (profile.employeeId ?? email.split("@")[0]).toUpperCase();
-      const designation = profile.jobTitle?.trim() ?? "";
-      const contactNumber =
-        (profile.mobilePhone?.trim() ??
-          profile.businessPhones?.find((phone) => phone?.trim())?.trim() ??
-          "");
+      if (!email) throw new Error("Email not found");
 
-      let reportingManager = "";
-      try {
-        const managerRes = await fetch(
-          "https://graph.microsoft.com/v1.0/me/manager?$select=displayName",
-          { headers: { Authorization: `Bearer ${msToken}` } }
-        );
+      const displayName    = profile.displayName ?? email;
+      const department     = profile.department ?? "";
+      const employeeCode   = (profile.employeeId ?? email.split("@")[0]).toUpperCase();
+      const designation    = profile.jobTitle ?? "";
+      const contactNumber  = profile.mobilePhone ?? "";
 
-        if (managerRes.ok) {
-          const manager = await managerRes.json() as { displayName?: string | null };
-          reportingManager = manager.displayName?.trim() ?? "";
-        }
-      } catch {
-        reportingManager = "";
-      }
-
-      if (!email) throw new Error("Could not read email from Microsoft account.");
-
-      // Exchange with BGauss Travel API for our own JWT
-      const apiRes = await fetch("/api/Auth/ms-login", {
+      const apiRes = await fetch("https://localhost:7136/api/Auth/ms-login", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email,
-          displayName,
-          employeeId: employeeCode,
-          department,
-          msToken,
-        }),
+        body: JSON.stringify({ email, displayName, employeeId: employeeCode, department }),
       });
 
       if (!apiRes.ok) {
-        const errBody = await apiRes.json() as { message?: string };
-        throw new Error(errBody.message ?? `API error: ${apiRes.status}`);
+        const err = await apiRes.json();
+        throw new Error(err.message ?? "API error");
       }
 
-      const apiData = await apiRes.json() as MsLoginApiResponse;
+      const apiData: MsLoginApiResponse = await apiRes.json();
 
-      // Persist session
-      localStorage.setItem("jwt_token",     apiData.token);
-      localStorage.setItem("employee_id",   String(apiData.employeeId));
-      localStorage.setItem("full_name",     apiData.displayName);
-      localStorage.setItem("email",         apiData.email);
-      localStorage.setItem("role",          apiData.role);
-      localStorage.setItem("employee_code", apiData.employeeCode);
-      localStorage.setItem("department",    apiData.department ?? "");
-      localStorage.setItem("designation",   designation);
-      localStorage.setItem("reporting_manager", reportingManager);
-      localStorage.setItem("contact_number", contactNumber);
+      localStorage.setItem("jwt_token",      apiData.token);
+      localStorage.setItem("employee_id",    String(apiData.employeeId));
+      localStorage.setItem("full_name",      apiData.displayName);
+      localStorage.setItem("email",          apiData.email);
+      localStorage.setItem("role",           apiData.role);
+      localStorage.setItem("employee_code",  apiData.employeeCode);
+      localStorage.setItem("department",     apiData.department ?? "");
 
       const msUser: MsUser = {
         email:        apiData.email,
@@ -159,7 +119,6 @@ export function useMsalLogin(
         employeeCode: apiData.employeeCode,
         department:   apiData.department,
         designation,
-        reportingManager,
         contactNumber,
         role:         apiData.role,
         employeeId:   apiData.employeeId,
@@ -167,99 +126,65 @@ export function useMsalLogin(
       };
 
       setUser(msUser);
-      setError(null);
       onSuccess?.(msUser);
 
-    } catch (e: unknown) {
-      const err = e as Error;
-      setError(err.message ?? "Sign-in failed. Please try again.");
+    } catch (err: any) {
+      console.error("❌ Login failed", err);
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   }, [onSuccess]);
 
-  // ── Initialize MSAL and handle redirect on page load ──────
   useEffect(() => {
     let cancelled = false;
 
-    const init = async (): Promise<void> => {
+    const init = async () => {
       try {
-        // MUST initialize before any other MSAL call
-        await msalInstance.initialize();
-
-        // Handle the redirect result (fires after MS redirects back to app)
-        const result: AuthenticationResult | null =
-          await msalInstance.handleRedirectPromise();
-
+        const result = await msalInstance.handleRedirectPromise();
         if (cancelled) return;
 
         if (result?.account) {
-          // We just came back from a successful redirect login
           msalInstance.setActiveAccount(result.account);
           await completeLogin(result);
-        } else {
-          // Keep the login page visible until the user explicitly signs in.
-          setUser(null);
         }
 
-        if (!cancelled) setMsalReady(true);
-
-      } catch (e: unknown) {
-        if (!cancelled) {
-          const err = e as Error;
-          // Show a friendlier message — the raw MSAL error is too technical
-          const msg = err.message ?? "";
-          if (msg.includes("AADSTS9002326")) {
-            setError(
-              "Azure app configuration error: the redirect URI must be registered " +
-              "under 'Single-Page Application' platform in Azure Portal → " +
-              "App registrations → Authentication. It is currently registered " +
-              "under 'Web'. Please fix this in Azure Portal and try again."
-            );
-          } else {
-            setError("Auth initialisation failed: " + msg);
-          }
-          setMsalReady(true); // allow button to show even if init failed
-        }
+        setMsalReady(true);
+      } catch (err: any) {
+        console.error("❌ MSAL error", err);
+        setError(err.message);
+        setMsalReady(true);
+      } finally {
+        if (!cancelled) setIsInitializing(false);  // ✅ unblocks PrivateRoute
       }
     };
 
     void init();
     return () => { cancelled = true; };
-  }, [completeLogin, onSuccess]);
+  }, [completeLogin]);
 
-  // ── Sign in ────────────────────────────────────────────────
-  // Uses loginRedirect — the SPA flow. After Microsoft authenticates the user,
-  // they are redirected back to redirectUri and handleRedirectPromise() fires.
-  const signIn = useCallback((): void => {
+  const signIn = useCallback(() => {
     if (!msalReady) return;
     setError(null);
     setLoading(true);
     setUser(null);
     clearAppSession();
 
-    void msalInstance.loginRedirect({
+    msalInstance.loginRedirect({
       ...graphScopes,
       prompt: "login",
-    }).catch((e: unknown) => {
-      const err = e as Error;
-      setError(err.message ?? "Sign-in failed.");
+    }).catch((err) => {
+      console.error(err);
+      setError(err.message);
       setLoading(false);
     });
   }, [msalReady]);
 
-  const signOut = useCallback(async (): Promise<void> => {
-    try {
-      clearAppSession();
-      setUser(null);
-      setError(null);
-      msalInstance.setActiveAccount(null);
-    } catch (e: unknown) {
-      console.error("Sign-out failed", e);
-    } finally {
-      window.location.replace("/login");
-    }
+  const signOut = useCallback(async () => {
+    clearAppSession();
+    setUser(null);
+    window.location.replace("/login");
   }, []);
 
-  return { signIn, signOut, loading, msalReady, error, user };
+  return { signIn, signOut, loading, msalReady, isInitializing, error, user };
 }

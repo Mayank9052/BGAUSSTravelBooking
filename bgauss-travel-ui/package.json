@@ -14,19 +14,21 @@
   "dependencies": {
     "@azure/msal-browser": "^3.25.0",
     "@azure/msal-react": "^2.1.0",
+    "@microsoft/signalr": "^10.0.0",
     "axios": "^1.7.9",
+    "date-fns": "^3.6.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.28.1",
-    "date-fns": "^3.6.0"
+    "react-router-dom": "^6.28.1"
   },
   "devDependencies": {
+    "@types/node": "^25.5.2",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "concurrently": "^9.1.0",
-    "eslint": "^9.15.0",
+    "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^5.0.0",
     "eslint-plugin-react-refresh": "^0.4.14",
     "postcss": "^8.4.49",
