@@ -1,23 +1,23 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\bg-adm\\Desktop\\BgaussTravelBookingProj\\BGAUSSTravelBooking\\BgaussTravel.API\\BgaussTravel.API.csproj": {}
+    "C:\\Users\\priyanka.nikam\\Desktop\\BGTRAVEL\\BGAUSSTravelBooking\\BgaussTravel.API\\BgaussTravel.API.csproj": {}
   },
   "projects": {
-    "C:\\Users\\bg-adm\\Desktop\\BgaussTravelBookingProj\\BGAUSSTravelBooking\\BgaussTravel.API\\BgaussTravel.API.csproj": {
+    "C:\\Users\\priyanka.nikam\\Desktop\\BGTRAVEL\\BGAUSSTravelBooking\\BgaussTravel.API\\BgaussTravel.API.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\bg-adm\\Desktop\\BgaussTravelBookingProj\\BGAUSSTravelBooking\\BgaussTravel.API\\BgaussTravel.API.csproj",
+        "projectUniqueName": "C:\\Users\\priyanka.nikam\\Desktop\\BGTRAVEL\\BGAUSSTravelBooking\\BgaussTravel.API\\BgaussTravel.API.csproj",
         "projectName": "BgaussTravel.API",
-        "projectPath": "C:\\Users\\bg-adm\\Desktop\\BgaussTravelBookingProj\\BGAUSSTravelBooking\\BgaussTravel.API\\BgaussTravel.API.csproj",
-        "packagesPath": "C:\\Users\\bg-adm\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\bg-adm\\Desktop\\BgaussTravelBookingProj\\BGAUSSTravelBooking\\BgaussTravel.API\\obj\\",
+        "projectPath": "C:\\Users\\priyanka.nikam\\Desktop\\BGTRAVEL\\BGAUSSTravelBooking\\BgaussTravel.API\\BgaussTravel.API.csproj",
+        "packagesPath": "C:\\Users\\priyanka.nikam\\.nuget\\packages\\",
+        "outputPath": "C:\\Users\\priyanka.nikam\\Desktop\\BGTRAVEL\\BGAUSSTravelBooking\\BgaussTravel.API\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
         ],
         "configFilePaths": [
-          "C:\\Users\\bg-adm\\AppData\\Roaming\\NuGet\\NuGet.Config",
+          "C:\\Users\\priyanka.nikam\\AppData\\Roaming\\NuGet\\NuGet.Config",
           "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
           "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
         ],
@@ -87,9 +87,9 @@
               "target": "Package",
               "version": "[8.17.0, )"
             },
-            "Swashbuckle.AspNetCore": {
+            "Scalar.AspNetCore": {
               "target": "Package",
-              "version": "[10.0.1, )"
+              "version": "[2.13.20, )"
             }
           },
           "imports": [

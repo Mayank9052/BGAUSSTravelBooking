@@ -1,3 +1,4 @@
+/// src/components/layout/CommonNavbar.tsx
 import styles from "./CommonNavbar.module.css";
 
 interface NavItem {
