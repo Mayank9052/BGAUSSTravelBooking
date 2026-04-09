@@ -13,6 +13,9 @@ export interface MsUser {
   displayName:  string;
   employeeCode: string;
   department:   string;
+  designation?: string;
+  reportingManager?: string;
+  contactNumber?: string;
   role:         string;
   employeeId:   number;
   token:        string;
@@ -45,6 +48,9 @@ const APP_SESSION_KEYS = [
   "role",
   "employee_code",
   "department",
+  "designation",
+  "reporting_manager",
+  "contact_number",
 ] as const;
 
 function clearAppSession(): void {
@@ -70,19 +76,48 @@ export function useMsalLogin(
 
       // Fetch full profile from Microsoft Graph
       const graphRes = await fetch(
-        "https://graph.microsoft.com/v1.0/me?$select=displayName,mail,userPrincipalName,department,employeeId",
+        "https://graph.microsoft.com/v1.0/me?$select=displayName,mail,userPrincipalName,department,employeeId,jobTitle,mobilePhone,businessPhones",
         { headers: { Authorization: `Bearer ${msToken}` } }
       );
 
       if (!graphRes.ok)
         throw new Error(`Microsoft Graph error: ${graphRes.status}`);
 
-      const profile = await graphRes.json() as Record<string, string | null | undefined>;
+      const profile = await graphRes.json() as {
+        displayName?: string | null;
+        mail?: string | null;
+        userPrincipalName?: string | null;
+        department?: string | null;
+        employeeId?: string | null;
+        jobTitle?: string | null;
+        mobilePhone?: string | null;
+        businessPhones?: string[] | null;
+      };
 
-      const email       = (profile["mail"] ?? profile["userPrincipalName"] ?? "").toLowerCase().trim();
-      const displayName = profile["displayName"] ?? email;
-      const department  = profile["department"]  ?? "";
-      const employeeCode= (profile["employeeId"] ?? email.split("@")[0]).toUpperCase();
+      const email = (profile.mail ?? profile.userPrincipalName ?? "").toLowerCase().trim();
+      const displayName = profile.displayName ?? email;
+      const department = profile.department ?? "";
+      const employeeCode = (profile.employeeId ?? email.split("@")[0]).toUpperCase();
+      const designation = profile.jobTitle?.trim() ?? "";
+      const contactNumber =
+        (profile.mobilePhone?.trim() ??
+          profile.businessPhones?.find((phone) => phone?.trim())?.trim() ??
+          "");
+
+      let reportingManager = "";
+      try {
+        const managerRes = await fetch(
+          "https://graph.microsoft.com/v1.0/me/manager?$select=displayName",
+          { headers: { Authorization: `Bearer ${msToken}` } }
+        );
+
+        if (managerRes.ok) {
+          const manager = await managerRes.json() as { displayName?: string | null };
+          reportingManager = manager.displayName?.trim() ?? "";
+        }
+      } catch {
+        reportingManager = "";
+      }
 
       if (!email) throw new Error("Could not read email from Microsoft account.");
 
@@ -114,12 +149,18 @@ export function useMsalLogin(
       localStorage.setItem("role",          apiData.role);
       localStorage.setItem("employee_code", apiData.employeeCode);
       localStorage.setItem("department",    apiData.department ?? "");
+      localStorage.setItem("designation",   designation);
+      localStorage.setItem("reporting_manager", reportingManager);
+      localStorage.setItem("contact_number", contactNumber);
 
       const msUser: MsUser = {
         email:        apiData.email,
         displayName:  apiData.displayName,
         employeeCode: apiData.employeeCode,
         department:   apiData.department,
+        designation,
+        reportingManager,
+        contactNumber,
         role:         apiData.role,
         employeeId:   apiData.employeeId,
         token:        apiData.token,

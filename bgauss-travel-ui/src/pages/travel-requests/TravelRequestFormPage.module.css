@@ -160,6 +160,14 @@
   text-transform: uppercase;
 }
 
+.sectionNote {
+  max-width: 700px;
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #64748b;
+}
+
 .typeChip {
   padding: 8px 10px;
   border-radius: 999px;
@@ -193,6 +201,10 @@
   color: #334155;
 }
 
+.requiredMark {
+  color: #d83b34;
+}
+
 .input {
   width: 100%;
   min-height: 44px;
@@ -213,6 +225,12 @@
 .textarea {
   min-height: 104px;
   resize: vertical;
+}
+
+.divider {
+  height: 1px;
+  margin: 22px 0;
+  background: linear-gradient(90deg, rgba(216, 59, 52, 0.18), rgba(226, 232, 240, 0.95));
 }
 
 .profileBlock {

@@ -1,11 +1,12 @@
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { useMsalLogin } from "../../auth/useMsalLogin";
 import CommonNavbar from "../../components/layout/CommonNavbar";
+import { getSessionUserProfile, hasRequiredEmployeeDetails } from "../../utils/sessionUser";
 import styles from "./TravelRequestFormPage.module.css";
 
 const REQUEST_PAGE_CONFIG = {
   flight: {
-    icon: "✈️",
+    icon: "\u2708\uFE0F",
     title: "Flight Booking Request",
     subtitle: "Raise an air travel request for domestic or international business movement.",
     routeLabel: "Flight",
@@ -27,7 +28,7 @@ const REQUEST_PAGE_CONFIG = {
     documents: ["Travel agenda", "Approval mail", "Customer or plant visit note"],
   },
   train: {
-    icon: "🚂",
+    icon: "\uD83D\uDE82",
     title: "Train Booking Request",
     subtitle: "Raise a rail booking request for intercity official travel.",
     routeLabel: "Train",
@@ -49,7 +50,7 @@ const REQUEST_PAGE_CONFIG = {
     documents: ["Visit purpose note", "Approval mail", "Travel timeline"],
   },
   cab: {
-    icon: "🚕",
+    icon: "\uD83D\uDE95",
     title: "Cab Booking Request",
     subtitle: "Raise a request for office visits, airport transfers, or local business travel.",
     routeLabel: "Cab",
@@ -71,7 +72,7 @@ const REQUEST_PAGE_CONFIG = {
     documents: ["Meeting schedule", "Approval mail", "Airport or office timing"],
   },
   hotel: {
-    icon: "🏨",
+    icon: "\uD83C\uDFE8",
     title: "Hotel Booking Request",
     subtitle: "Raise an accommodation request for approved overnight travel and events.",
     routeLabel: "Hotel",
@@ -102,11 +103,21 @@ export default function TravelRequestFormPage() {
   const { requestType } = useParams<{ requestType: string }>();
 
   const config = requestType ? REQUEST_PAGE_CONFIG[requestType as RequestType] : undefined;
+  const sessionUser = getSessionUserProfile();
+  const employeeDetails = {
+    employeeId: sessionUser.employeeId || sessionUser.employeeRecordId,
+    fullName: sessionUser.fullName,
+    department: sessionUser.department,
+    designation: sessionUser.designation,
+    reportingManager: sessionUser.reportingManager,
+    contactNumber: sessionUser.contactNumber,
+    email: sessionUser.email,
+  };
 
-  const fullName = localStorage.getItem("full_name") ?? "Employee";
-  const role = localStorage.getItem("role") ?? "Employee";
-  const department = localStorage.getItem("department") ?? "";
-  const employeeCode = localStorage.getItem("employee_code") ?? "";
+  const fullName = sessionUser.fullName || "Employee";
+  const role = sessionUser.role || "Employee";
+  const department = sessionUser.department;
+  const employeeCode = employeeDetails.employeeId;
 
   const initials =
     fullName
@@ -123,6 +134,10 @@ export default function TravelRequestFormPage() {
   };
 
   if (!config) {
+    return <Navigate to="/booking/new" replace />;
+  }
+
+  if (!hasRequiredEmployeeDetails(employeeDetails)) {
     return <Navigate to="/booking/new" replace />;
   }
 
@@ -160,6 +175,10 @@ export default function TravelRequestFormPage() {
               <div>
                 <p className={styles.sectionEyebrow}>Request details</p>
                 <h2 className={styles.sectionTitle}>Employee Travel Submission</h2>
+                <p className={styles.sectionNote}>
+                  Employee details were captured in Raise Travel Request. Complete only the
+                  selected {config.routeLabel.toLowerCase()} request details here.
+                </p>
               </div>
               <span className={styles.typeChip}>{config.routeLabel}</span>
             </div>
@@ -240,6 +259,18 @@ export default function TravelRequestFormPage() {
                   <p className={styles.profileName}>{fullName}</p>
                   <p className={styles.profileMeta}>{role} · {department || "BGauss"}</p>
                   <p className={styles.profileMeta}>Code: {employeeCode || "N/A"}</p>
+                  <p className={styles.profileMeta}>
+                    Designation: {sessionUser.designation || "To be updated"}
+                  </p>
+                  <p className={styles.profileMeta}>
+                    Reporting Manager: {sessionUser.reportingManager || "To be updated"}
+                  </p>
+                  <p className={styles.profileMeta}>
+                    Contact: {sessionUser.contactNumber || "To be updated"}
+                  </p>
+                  <p className={styles.profileMeta}>
+                    Email: {sessionUser.email || "To be updated"}
+                  </p>
                 </div>
               </div>
             </section>
