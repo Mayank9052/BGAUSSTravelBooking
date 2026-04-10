@@ -1,3 +1,4 @@
+// src/utils/sessionUser.ts
 export interface SessionUserProfile {
   employeeId: string;
   employeeRecordId: string;
@@ -31,22 +32,21 @@ function readFirstValue(keys: string[]): string {
   return "";
 }
 
+// src/utils/sessionUser.ts
+
 export function getSessionUserProfile(): SessionUserProfile {
   return {
-    employeeId: readFirstValue(["employee_code", "employee_id"]),
+    // employeeId = the human-readable code (e.g. "EMP001") for display
+    employeeId:       readFirstValue(["employee_code"]),
+    // employeeRecordId = the numeric DB primary key — used for API calls
     employeeRecordId: readFirstValue(["employee_id"]),
-    fullName: readFirstValue(["full_name"]),
-    department: readFirstValue(["department"]),
-    designation: readFirstValue(["designation", "job_title"]),
+    fullName:         readFirstValue(["full_name"]),
+    department:       readFirstValue(["department"]),
+    designation:      readFirstValue(["designation", "job_title"]),
     reportingManager: readFirstValue(["reporting_manager", "manager_name"]),
-    contactNumber: readFirstValue([
-      "contact_number",
-      "mobile_phone",
-      "business_phone",
-      "phone",
-    ]),
-    email: readFirstValue(["email"]),
-    role: readFirstValue(["role"]) || "Employee",
+    contactNumber:    readFirstValue(["contact_number", "mobile_phone", "business_phone", "phone"]),
+    email:            readFirstValue(["email"]),
+    role:             readFirstValue(["role"]) || "Employee",
   };
 }
 

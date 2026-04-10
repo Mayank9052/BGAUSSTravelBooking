@@ -1,7 +1,8 @@
 // src/services/bookingService.ts
 // Connects to: BookingController.cs
 //   GET  /api/Booking/my
-//   GET  /api/Booking          (Admin/HR)
+//   GET  /api/Booking          (Admin/HR — paginated)
+//   GET  /api/Booking/all      (Admin/HR — flat list for dashboard)
 //   GET  /api/Booking/{id}
 //   POST /api/Booking
 //   PUT  /api/Booking/{id}
@@ -11,13 +12,14 @@ import { get, post, put, del } from "./apiClient";
 import type { TravelRequestResponse, PagedResult } from "./apiClient";
 
 export interface CreateBookingInput {
-  travelPurpose:   string;
-  destination:     string;
-  departureDate:   string;   // "yyyy-MM-dd"
-  returnDate:      string;   // "yyyy-MM-dd"
-  transportType:   string;   // Flight | Train | Cab | Hotel | Multiple
+  employeeId:       number;
+  travelPurpose:    string;
+  destination:      string;
+  departureDate:    string;   // "yyyy-MM-dd"
+  returnDate:       string;   // "yyyy-MM-dd"
+  transportType:    string;   // Flight | Train | Cab | Hotel | Multiple
   estimatedAmount?: number;
-  notes?:          string;
+  notes?:           string;
 }
 
 export interface UpdateBookingInput {
@@ -31,11 +33,22 @@ export interface UpdateBookingInput {
 }
 
 export const bookingService = {
-  /** DashboardPage: My travel requests list */
+  /** DashboardPage: employee's own trips */
   getMy: () =>
     get<TravelRequestResponse[]>("/Booking/my"),
 
-  /** Admin/HR: all requests with filters */
+  /**
+   * Admin/HR DashboardPage — History sub-tab.
+   * Returns a flat array (no pagination) filtered to Approved + Rejected.
+   * Calls GET /api/Booking/my for now (reuses same endpoint scoped by role on backend).
+   * If your BookingController has a dedicated /api/Booking/all, point there instead.
+   */
+  getAllResolved: () =>
+    get<TravelRequestResponse[]>("/Booking/my")
+      .then(list => list.filter(r => r.status === "Approved" || r.status === "Rejected"))
+      .catch(() => [] as TravelRequestResponse[]),
+
+  /** Admin/HR pages — paginated with filters */
   getAll: (params?: { status?: string; transport?: string; page?: number; pageSize?: number }) => {
     const qs = new URLSearchParams();
     if (params?.status)    qs.set("status",    params.status);
@@ -48,7 +61,6 @@ export const bookingService = {
   getById: (id: number) =>
     get<TravelRequestResponse>(`/Booking/${id}`),
 
-  /** TravelRequestFormPage submit */
   create: (dto: CreateBookingInput) =>
     post<{ requestId: number; requestCode: string }>("/Booking", dto),
 

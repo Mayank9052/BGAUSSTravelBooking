@@ -14,6 +14,9 @@ import TravelRequestFormPage from "./pages/travel-requests/TravelRequestFormPage
 import type { MsUser } from "./auth/useMsalLogin";
 import "./index.css";
 import PrivateRoute from "./components/PrivateRoute";
+import ExpenseSubmitPage from "./pages/expenses/ExpenseSubmitPage";
+import ReportsPage       from "./pages/reports/ReportsPage";
+import ProfilePage       from "./pages/profile/ProfilePage";
 
 // Guard: redirect to /login if no JWT token in localStorage
 // function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -77,6 +80,10 @@ msalInstance.initialize().then(() => {
                 </PrivateRoute>
               }
             />
+
+            <Route path="/expense/submit" element={<ExpenseSubmitPage />} />
+            <Route path="/reports"        element={<ReportsPage />} />
+            <Route path="/profile"        element={<ProfilePage />} />
 
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/login" replace />} />

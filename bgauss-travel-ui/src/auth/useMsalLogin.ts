@@ -88,6 +88,7 @@ export function useMsalLogin(
 
       const displayName    = profile.displayName ?? email;
       const department     = profile.department ?? "";
+      const employeeId     = profile.employeeId ?? "";
       const employeeCode   = (profile.employeeId ?? email.split("@")[0]).toUpperCase();
       const designation    = profile.jobTitle ?? "";
       const contactNumber  = profile.mobilePhone ?? "";
@@ -95,7 +96,7 @@ export function useMsalLogin(
       const apiRes = await fetch("https://localhost:7136/api/Auth/ms-login", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, displayName, employeeId: employeeCode, department }),
+        body: JSON.stringify({ email, displayName, employeeId: employeeId, department }),
       });
 
       if (!apiRes.ok) {
