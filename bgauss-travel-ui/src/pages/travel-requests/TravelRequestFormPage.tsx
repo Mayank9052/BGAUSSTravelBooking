@@ -1,7 +1,13 @@
-import { Navigate, useNavigate, useParams } from "react-router-dom";
+import { useEffect } from "react";
+import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useMsalLogin } from "../../auth/useMsalLogin";
 import CommonNavbar from "../../components/layout/CommonNavbar";
-import { getSessionUserProfile, hasRequiredEmployeeDetails } from "../../utils/sessionUser";
+import {
+  getSessionUserProfile,
+  hasRequiredEmployeeDetails,
+  persistEmployeeDetails,
+  type EditableEmployeeDetails,
+} from "../../utils/sessionUser";
 import styles from "./TravelRequestFormPage.module.css";
 
 const REQUEST_PAGE_CONFIG = {
@@ -96,27 +102,35 @@ const REQUEST_PAGE_CONFIG = {
 } as const;
 
 type RequestType = keyof typeof REQUEST_PAGE_CONFIG;
+type TravelRequestRouteState = {
+  employeeDetails?: EditableEmployeeDetails;
+};
 
 export default function TravelRequestFormPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { signOut } = useMsalLogin();
   const { requestType } = useParams<{ requestType: string }>();
 
   const config = requestType ? REQUEST_PAGE_CONFIG[requestType as RequestType] : undefined;
+  const submittedEmployeeDetails = (location.state as TravelRequestRouteState | null)?.employeeDetails;
   const sessionUser = getSessionUserProfile();
-  const employeeDetails = {
-    employeeId: sessionUser.employeeId || sessionUser.employeeRecordId,
-    fullName: sessionUser.fullName,
-    department: sessionUser.department,
-    designation: sessionUser.designation,
-    reportingManager: sessionUser.reportingManager,
-    contactNumber: sessionUser.contactNumber,
-    email: sessionUser.email,
-  };
+  const employeeDetails =
+    submittedEmployeeDetails && hasRequiredEmployeeDetails(submittedEmployeeDetails)
+      ? submittedEmployeeDetails
+      : {
+          employeeId: sessionUser.employeeId || sessionUser.employeeRecordId,
+          fullName: sessionUser.fullName,
+          department: sessionUser.department,
+          designation: sessionUser.designation,
+          reportingManager: sessionUser.reportingManager,
+          contactNumber: sessionUser.contactNumber,
+          email: sessionUser.email,
+        };
 
-  const fullName = sessionUser.fullName || "Employee";
+  const fullName = employeeDetails.fullName || sessionUser.fullName || "Employee";
   const role = sessionUser.role || "Employee";
-  const department = sessionUser.department;
+  const department = employeeDetails.department || sessionUser.department;
   const employeeCode = employeeDetails.employeeId;
 
   const initials =
@@ -132,6 +146,12 @@ export default function TravelRequestFormPage() {
   const handleSignOut = async () => {
     await signOut();
   };
+
+  useEffect(() => {
+    if (submittedEmployeeDetails && hasRequiredEmployeeDetails(submittedEmployeeDetails)) {
+      persistEmployeeDetails(submittedEmployeeDetails);
+    }
+  }, [submittedEmployeeDetails]);
 
   if (!config) {
     return <Navigate to="/booking/new" replace />;
@@ -260,16 +280,16 @@ export default function TravelRequestFormPage() {
                   <p className={styles.profileMeta}>{role} · {department || "BGauss"}</p>
                   <p className={styles.profileMeta}>Code: {employeeCode || "N/A"}</p>
                   <p className={styles.profileMeta}>
-                    Designation: {sessionUser.designation || "To be updated"}
+                    Designation: {employeeDetails.designation || sessionUser.designation || "To be updated"}
                   </p>
                   <p className={styles.profileMeta}>
-                    Reporting Manager: {sessionUser.reportingManager || "To be updated"}
+                    Reporting Manager: {employeeDetails.reportingManager || sessionUser.reportingManager || "To be updated"}
                   </p>
                   <p className={styles.profileMeta}>
-                    Contact: {sessionUser.contactNumber || "To be updated"}
+                    Contact: {employeeDetails.contactNumber || sessionUser.contactNumber || "To be updated"}
                   </p>
                   <p className={styles.profileMeta}>
-                    Email: {sessionUser.email || "To be updated"}
+                    Email: {employeeDetails.email || sessionUser.email || "To be updated"}
                   </p>
                 </div>
               </div>

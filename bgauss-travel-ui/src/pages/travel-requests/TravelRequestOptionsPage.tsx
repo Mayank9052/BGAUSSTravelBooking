@@ -95,7 +95,11 @@ export default function TravelRequestOptionsPage() {
     }
 
     persistEmployeeDetails(employeeDetails);
-    navigate(selectedRequest.path);
+    navigate(selectedRequest.path, {
+      state: {
+        employeeDetails,
+      },
+    });
   };
 
   const selectedRequest = REQUEST_OPTIONS.find((option) => option.id === selectedOption);
