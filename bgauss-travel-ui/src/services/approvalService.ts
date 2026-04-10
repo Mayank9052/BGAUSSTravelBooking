@@ -1,5 +1,6 @@
 // src/services/approvalService.ts
 // Connects to: ApprovalController.cs  (Admin/HR only)
+//   GET  /api/Approval/summary
 //   GET  /api/Approval/pending
 //   POST /api/Approval/request/{id}
 //   GET  /api/Approval/history/{requestId}
@@ -12,8 +13,27 @@ export interface ApprovalInput {
   comments?: string;
 }
 
+// Shape returned by GET /api/Approval/summary
+export interface ApprovalSummary {
+  pendingApprovals: number;
+  approvedCount:    number;
+  rejectedCount:    number;
+  draftCount:       number;
+  totalRequests:    number;
+  expensePipeline:  number;
+  resolvedRequests: TravelRequestResponse[];
+}
+
 export const approvalService = {
-  /** Admin/HR DashboardPage "Approvals" tab */
+  /**
+   * HR/Admin dashboard stat cards + History sub-tab data.
+   * Single call replaces bookingService.getAllResolved() —
+   * the resolvedRequests array is embedded in the response.
+   */
+  summary: () =>
+    get<ApprovalSummary>("/Approval/summary"),
+
+  /** Admin/HR DashboardPage "Approvals" tab — Pending sub-tab */
   pending: () =>
     get<{
       pendingRequests: TravelRequestResponse[];
@@ -26,7 +46,7 @@ export const approvalService = {
       `/Approval/request/${id}`, dto
     ),
 
-  /** Full approval trail for a request */
+  /** Full approval trail for a single request */
   history: (requestId: number) =>
     get<ApprovalResponse[]>(`/Approval/history/${requestId}`),
 };

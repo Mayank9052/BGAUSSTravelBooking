@@ -1,26 +1,28 @@
 @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600&display=swap');
 
+/* ── Base ──────────────────────────────────────────────────────────────────── */
 .page {
   min-height: 100svh;
   display: flex;
   flex-direction: column;
   background:
-    radial-gradient(circle at top left, rgba(216, 59, 52, 0.08), transparent 25%),
+    radial-gradient(circle at top left, rgba(216, 59, 52, 0.08), transparent 24%),
     linear-gradient(180deg, #f3f6fb 0%, #f8fafc 100%);
-  color: #0f172a;
   font-family: 'Barlow', system-ui, sans-serif;
+  color: #0f172a;
 }
 
 .main {
   width: min(1320px, 100%);
   margin: 0 auto;
-  padding: 20px clamp(16px, 2vw, 28px) 32px;
+  padding: 20px clamp(16px, 2vw, 28px) 40px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 20px;
   flex: 1;
 }
 
+/* ── Hero ──────────────────────────────────────────────────────────────────── */
 .hero {
   display: flex;
   align-items: flex-start;
@@ -33,106 +35,158 @@
   box-shadow: 0 16px 34px rgba(15, 23, 42, 0.12);
 }
 
-.eyebrow {
-  margin: 0 0 8px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
+.heroCopy { max-width: 760px; }
+
+.heroBadge {
+  display: inline-flex;
+  margin-bottom: 10px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
   color: #ff9b95;
-}
-
-.title {
-  margin: 0 0 8px;
-  font-family: 'Barlow Condensed', sans-serif;
-  font-size: clamp(30px, 4vw, 42px);
-  font-weight: 800;
-  line-height: 0.98;
-  letter-spacing: -0.03em;
-  color: #fff;
-  text-transform: uppercase;
-  max-width: 900px;
-}
-
-.subtitle {
-  max-width: 760px;
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.65;
-  color: rgba(255, 255, 255, 0.68);
-}
-
-.heroActions {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.contentLayout {
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
-  gap: 16px;
-}
-
-.formCard,
-.optionsSection,
-.selectionCard {
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 18px;
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.05);
-}
-
-.formCard,
-.optionsSection,
-.selectionCard {
-  padding: 20px;
-}
-
-.sideColumn {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.sectionHeader {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 18px;
-}
-
-.sectionEyebrow {
-  margin: 0 0 6px;
-  color: #d83b34;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
-.sectionTitle {
-  margin: 0;
+.heroTitle {
+  margin: 0 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   font-family: 'Barlow Condensed', sans-serif;
-  font-size: 24px;
+  font-size: clamp(26px, 3.5vw, 40px);
   font-weight: 800;
+  line-height: 1;
   letter-spacing: -0.02em;
+  text-transform: uppercase;
+  color: #fff;
+}
+
+.heroIcon { font-size: 28px; }
+
+.heroSubtitle {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.65;
+  color: rgba(255, 255, 255, 0.68);
+  max-width: 640px;
+}
+
+.heroActions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  padding-top: 4px;
+}
+
+/* ── Buttons ───────────────────────────────────────────────────────────────── */
+.primaryBtn,
+.secondaryBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  padding: 10px 18px;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.primaryBtn:hover  { opacity: 0.88; }
+.secondaryBtn:hover { opacity: 0.78; }
+
+.primaryBtn {
+  border: none;
+  background: #d83b34;
+  color: #fff;
+}
+
+.secondaryBtn {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+/* Inside white cards the secondary button needs different styling */
+.formCard .secondaryBtn {
+  border: 1px solid #dbe2ea;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+/* ── Two-column layout ─────────────────────────────────────────────────────── */
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+  gap: 18px;
+  align-items: start;
+}
+
+/* ── Cards ─────────────────────────────────────────────────────────────────── */
+.formCard,
+.infoCard {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+}
+
+.formCard { padding: 24px; }
+
+.sideColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.infoCard { padding: 18px 20px; }
+
+/* ── Section header ────────────────────────────────────────────────────────── */
+.sectionHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.sectionEyebrow {
+  margin: 0 0 5px;
+  color: #d83b34;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
 }
 
-.sectionText {
-  margin: 8px 0 0;
-  font-size: 13px;
-  line-height: 1.65;
-  color: #64748b;
-  max-width: 720px;
+.sectionTitle {
+  margin: 0;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: clamp(20px, 2.5vw, 26px);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  color: #0f172a;
 }
 
-.sectionMeta {
-  padding: 8px 10px;
+.sectionNote {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #64748b;
+  max-width: 600px;
+}
+
+.typeChip {
+  flex-shrink: 0;
+  padding: 6px 12px;
   border-radius: 999px;
-  background: #eef2f7;
+  background: #f1f5f9;
   color: #475569;
   font-size: 11px;
   font-weight: 700;
@@ -141,7 +195,8 @@
   white-space: nowrap;
 }
 
-.formGrid {
+/* ── Form grid ─────────────────────────────────────────────────────────────── */
+.grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
@@ -153,9 +208,7 @@
   gap: 6px;
 }
 
-.fieldWide {
-  grid-column: 1 / -1;
-}
+.fieldWide { grid-column: 1 / -1; }
 
 .label {
   font-size: 12px;
@@ -166,189 +219,183 @@
 .input {
   width: 100%;
   min-height: 44px;
-  padding: 11px 12px;
-  border: 1px solid #dbe2ea;
-  border-radius: 12px;
+  padding: 10px 13px;
+  border: 1.5px solid #dbe2ea;
+  border-radius: 10px;
   background: #f8fafc;
   color: #0f172a;
   font-size: 13px;
+  font-family: inherit;
   outline: none;
+  transition: border-color 0.15s, background 0.15s;
+  box-sizing: border-box;
 }
 
 .input:focus {
   border-color: #d83b34;
   background: #fff;
+  box-shadow: 0 0 0 3px rgba(216, 59, 52, 0.08);
 }
 
-.actionsRow {
-  grid-column: 1 / -1;
+.textarea {
+  min-height: 100px;
+  resize: vertical;
+}
+
+/* ── Sidebar components ────────────────────────────────────────────────────── */
+.profileBlock {
   display: flex;
-  justify-content: flex-start;
-  margin-top: 8px;
+  align-items: flex-start;
+  gap: 14px;
 }
 
-.primaryBtn,
-.secondaryBtn {
-  display: inline-flex;
+.profileAvatar {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #e24d44 0%, #d83b34 100%);
+  display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 10px;
-  padding: 10px 16px;
-  font-size: 13px;
-  font-weight: 700;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.primaryBtn {
-  border: none;
-  background: #d83b34;
   color: #fff;
-}
-
-.primaryBtn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.secondaryBtn {
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
-}
-
-.selectionLabel {
-  margin: 0 0 8px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: #d83b34;
-}
-
-.selectionTitle {
-  margin: 0 0 8px;
-  font-family: 'Barlow Condensed', sans-serif;
-  font-size: 24px;
+  font-size: 15px;
   font-weight: 800;
-  letter-spacing: -0.02em;
-  text-transform: uppercase;
+}
+
+.profileName {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 700;
   color: #0f172a;
 }
 
-.selectionDescription {
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.65;
+.profileMeta {
+  margin: 2px 0 0;
+  font-size: 12px;
   color: #64748b;
+  line-height: 1.5;
 }
 
+.list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+/* ── Options grid (TravelRequestOptionsPage sidebar) ───────────────────────── */
 .optionsGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 .optionCard {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 10px;
-  text-align: left;
-  padding: 18px;
-  border: 1px solid #e2e8f0;
-  border-radius: 16px;
+  gap: 3px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 12px;
   background: #f8fafc;
   cursor: pointer;
-  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
 }
 
 .optionCard:hover {
   border-color: #d83b34;
-  box-shadow: 0 12px 24px rgba(216, 59, 52, 0.08);
-  transform: translateY(-1px);
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(216, 59, 52, 0.08);
 }
 
 .optionCardActive {
   border-color: #d83b34;
-  background: linear-gradient(180deg, #fff7f6 0%, #ffffff 100%);
-  box-shadow: 0 14px 26px rgba(216, 59, 52, 0.1);
+  background: #fff7f7;
+  box-shadow: 0 4px 12px rgba(216, 59, 52, 0.1);
 }
 
-.optionIcon {
-  width: 44px;
-  height: 44px;
-  border-radius: 14px;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 22px;
-}
+.optionIcon { font-size: 18px; margin-bottom: 2px; }
 
 .optionTitle {
-  font-size: 16px;
+  font-size: 13px;
   font-weight: 700;
   color: #0f172a;
 }
 
-.optionDescription {
-  font-size: 13px;
-  line-height: 1.6;
+.optionDesc {
+  font-size: 11px;
   color: #64748b;
+  line-height: 1.5;
 }
 
 .optionTag {
-  margin-top: auto;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: #edf2f7;
-  color: #475569;
+  margin-top: 4px;
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  color: #d83b34;
   text-transform: uppercase;
+  letter-spacing: 0.1em;
 }
 
-@media (max-width: 1100px) {
-  .contentLayout {
+/* ── Selection preview card ────────────────────────────────────────────────── */
+.selectionTitle {
+  margin: 6px 0 8px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 20px;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: #0f172a;
+}
+
+.selectionDesc {
+  margin: 0;
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.55;
+}
+
+/* ── Responsive ────────────────────────────────────────────────────────────── */
+@media (max-width: 1024px) {
+  .layout {
     grid-template-columns: 1fr;
+  }
+
+  .sideColumn {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   }
 }
 
 @media (max-width: 768px) {
-  .main {
-    padding: 16px 14px 24px;
-  }
+  .main { padding: 14px 14px 28px; }
+  .hero { padding: 18px 20px; }
 
-  .hero {
-    padding: 20px;
-  }
+  .grid { grid-template-columns: 1fr; }
 
-  .formGrid,
-  .optionsGrid {
-    grid-template-columns: 1fr;
-  }
+  .heroTitle { font-size: 26px; }
+
+  .sideColumn { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 480px) {
-  .main {
-    padding: 12px 12px 20px;
-  }
+  .main { padding: 12px 12px 24px; }
 
-  .heroActions {
-    width: 100%;
-  }
+  .heroActions { width: 100%; }
 
   .primaryBtn,
-  .secondaryBtn {
-    width: 100%;
-  }
+  .secondaryBtn { flex: 1; }
 
-  .formCard,
-  .optionsSection,
-  .selectionCard {
-    padding: 16px;
-  }
+  .formCard { padding: 16px; }
+  .infoCard  { padding: 14px 16px; }
+
+  .grid { grid-template-columns: 1fr; gap: 12px; }
 }

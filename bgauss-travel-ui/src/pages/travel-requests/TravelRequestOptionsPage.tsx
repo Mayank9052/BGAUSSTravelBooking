@@ -1,10 +1,11 @@
+// src/pages/travel-requests/TravelRequestOptionsPage.tsx
+
 import { useState, type ChangeEvent, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMsalLogin } from "../../auth/useMsalLogin";
 import CommonNavbar from "../../components/layout/CommonNavbar";
 import {
   getSessionUserProfile,
-  hasRequiredEmployeeDetails,
   persistEmployeeDetails,
   type EditableEmployeeDetails,
 } from "../../utils/sessionUser";
@@ -13,28 +14,28 @@ import styles from "./TravelRequestOptionsPage.module.css";
 const REQUEST_OPTIONS = [
   {
     id: "flight",
-    icon: "\u2708\uFE0F",
+    icon: "✈️",
     title: "Flight Request",
     description: "Domestic and international air travel for meetings, site visits, and official tours.",
     path: "/booking/new/flight",
   },
   {
     id: "train",
-    icon: "\uD83D\uDE82",
+    icon: "🚆",
     title: "Train Request",
     description: "Rail booking for intercity travel with lower-cost and policy-friendly options.",
     path: "/booking/new/train",
   },
   {
     id: "cab",
-    icon: "\uD83D\uDE95",
+    icon: "🚕",
     title: "Cab Request",
     description: "Local transport for airport transfers, office visits, and same-day business movement.",
     path: "/booking/new/cab",
   },
   {
     id: "hotel",
-    icon: "\uD83C\uDFE8",
+    icon: "🏨",
     title: "Hotel Request",
     description: "Accommodation requests for approved overnight business travel and events.",
     path: "/booking/new/hotel",
@@ -44,81 +45,61 @@ const REQUEST_OPTIONS = [
 type RequestOptionId = (typeof REQUEST_OPTIONS)[number]["id"];
 
 export default function TravelRequestOptionsPage() {
-  const navigate = useNavigate();
+  const navigate    = useNavigate();
   const { signOut } = useMsalLogin();
   const sessionUser = getSessionUserProfile();
+
   const [selectedOption, setSelectedOption] = useState<RequestOptionId | "">("");
   const [employeeDetails, setEmployeeDetails] = useState<EditableEmployeeDetails>({
-    employeeId: sessionUser.employeeId || sessionUser.employeeRecordId,
-    fullName: sessionUser.fullName,
-    department: sessionUser.department,
-    designation: sessionUser.designation,
-    reportingManager: sessionUser.reportingManager,
-    contactNumber: sessionUser.contactNumber,
-    email: sessionUser.email,
+    employeeId:       sessionUser.employeeId       || sessionUser.employeeRecordId || "",
+    fullName:         sessionUser.fullName         || "",
+    department:       sessionUser.department       || "",
+    designation:      sessionUser.designation      || "",
+    reportingManager: sessionUser.reportingManager || "",
+    contactNumber:    sessionUser.contactNumber    || "",
+    email:            sessionUser.email            || "",
   });
 
-  const fullName = employeeDetails.fullName || sessionUser.fullName || "Employee";
-  const role = sessionUser.role || "Employee";
-  const isProfileComplete = hasRequiredEmployeeDetails(employeeDetails);
+  const fullName = employeeDetails.fullName || "Employee";
+  const role     = sessionUser.role || "Employee";
+  const initials = fullName.trim().split(" ").filter(Boolean)
+    .map(p => p[0]).slice(0, 2).join("").toUpperCase() || "ME";
 
-  const initials =
-    fullName
-      .trim()
-      .split(" ")
-      .filter(Boolean)
-      .map((part) => part[0])
-      .slice(0, 2)
-      .join("")
-      .toUpperCase() || "ME";
+  const selectedRequest = REQUEST_OPTIONS.find(o => o.id === selectedOption);
 
-  const handleSignOut = async () => {
-    await signOut();
+  const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setEmployeeDetails(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleEmployeeChange = (
-    event: ChangeEvent<HTMLInputElement | HTMLSelectElement>
-  ) => {
-    const { name, value } = event.target;
-    setEmployeeDetails((current) => ({
-      ...current,
-      [name]: value,
-    }));
-  };
-
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    const selectedRequest = REQUEST_OPTIONS.find((option) => option.id === selectedOption);
-    if (!selectedRequest) {
-      return;
-    }
-
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!selectedRequest) return;
+    // Persist filled details so TravelRequestFormPage can read them
     persistEmployeeDetails(employeeDetails);
     navigate(selectedRequest.path);
   };
-
-  const selectedRequest = REQUEST_OPTIONS.find((option) => option.id === selectedOption);
 
   return (
     <div className={styles.page}>
       <CommonNavbar
         user={{ initials, name: fullName, subtitle: role }}
-        onSignOut={handleSignOut}
+        onSignOut={async () => signOut()}
       />
 
       <main className={styles.main}>
+        {/* Hero */}
         <section className={styles.hero}>
-          <div>
-            <p className={styles.eyebrow}>Raise travel request</p>
-            <h1 className={styles.title}>Complete employee details before travel mode selection</h1>
-            <p className={styles.subtitle}>
-              New Travel Request now opens this raise-request form first. Fill the required
-              employee details, choose the mode of travel, and then continue to the selected
-              request form.
+          <div className={styles.heroCopy}>
+            <span className={styles.heroBadge}>Raise travel request</span>
+            <h1 className={styles.heroTitle}>
+              Complete employee details before travel mode selection
+            </h1>
+            <p className={styles.heroSubtitle}>
+              Fill the required employee details, choose the mode of travel, and continue to
+              the selected request form.
             </p>
           </div>
-
           <div className={styles.heroActions}>
             <button type="button" className={styles.secondaryBtn} onClick={() => navigate("/dashboard")}>
               Back to Dashboard
@@ -126,130 +107,90 @@ export default function TravelRequestOptionsPage() {
           </div>
         </section>
 
-        <div className={styles.contentLayout}>
+        <div className={styles.layout}>
+          {/* ── FORM CARD ───────────────────────────────────── */}
           <section className={styles.formCard}>
             <div className={styles.sectionHeader}>
               <div>
                 <p className={styles.sectionEyebrow}>Required fields</p>
                 <h2 className={styles.sectionTitle}>Raise Travel Request</h2>
-                <p className={styles.sectionText}>
-                  If any employee details are missing, complete them here first. After
-                  submission, the selected mode-of-travel form opens automatically.
+                <p className={styles.sectionNote}>
+                  Complete all employee details, choose the mode of travel, then click Continue.
                 </p>
               </div>
-              <span className={styles.sectionMeta}>
-                {isProfileComplete ? "Profile ready" : "Fill all required details"}
+              <span className={styles.typeChip}>
+                {selectedRequest ? selectedRequest.title : "No mode selected"}
               </span>
             </div>
 
-            <form className={styles.formGrid} onSubmit={handleSubmit}>
-              <label className={styles.field}>
-                <span className={styles.label}>Employee ID *</span>
-                <input
-                  className={styles.input}
-                  name="employeeId"
-                  value={employeeDetails.employeeId}
-                  onChange={handleEmployeeChange}
-                  placeholder="Enter employee ID"
-                  required
-                />
-              </label>
+            <form onSubmit={handleSubmit}>
+              <div className={styles.grid}>
 
-              <label className={styles.field}>
-                <span className={styles.label}>Employee Name *</span>
-                <input
-                  className={styles.input}
-                  name="fullName"
-                  value={employeeDetails.fullName}
-                  onChange={handleEmployeeChange}
-                  placeholder="Enter employee name"
-                  required
-                />
-              </label>
+                <label className={styles.field}>
+                  <span className={styles.label}>Employee ID *</span>
+                  <input className={styles.input} name="employeeId"
+                    value={employeeDetails.employeeId} onChange={handleChange}
+                    placeholder="Enter employee ID" required />
+                </label>
 
-              <label className={styles.field}>
-                <span className={styles.label}>Department *</span>
-                <input
-                  className={styles.input}
-                  name="department"
-                  value={employeeDetails.department}
-                  onChange={handleEmployeeChange}
-                  placeholder="Enter department"
-                  required
-                />
-              </label>
+                <label className={styles.field}>
+                  <span className={styles.label}>Employee Name *</span>
+                  <input className={styles.input} name="fullName"
+                    value={employeeDetails.fullName} onChange={handleChange}
+                    placeholder="Enter full name" required />
+                </label>
 
-              <label className={styles.field}>
-                <span className={styles.label}>Designation *</span>
-                <input
-                  className={styles.input}
-                  name="designation"
-                  value={employeeDetails.designation}
-                  onChange={handleEmployeeChange}
-                  placeholder="Enter designation"
-                  required
-                />
-              </label>
+                <label className={styles.field}>
+                  <span className={styles.label}>Department *</span>
+                  <input className={styles.input} name="department"
+                    value={employeeDetails.department} onChange={handleChange}
+                    placeholder="Enter department" required />
+                </label>
 
-              <label className={styles.field}>
-                <span className={styles.label}>Reporting Manager *</span>
-                <input
-                  className={styles.input}
-                  name="reportingManager"
-                  value={employeeDetails.reportingManager}
-                  onChange={handleEmployeeChange}
-                  placeholder="Enter reporting manager"
-                  required
-                />
-              </label>
+                <label className={styles.field}>
+                  <span className={styles.label}>Designation *</span>
+                  <input className={styles.input} name="designation"
+                    value={employeeDetails.designation} onChange={handleChange}
+                    placeholder="Enter designation" required />
+                </label>
 
-              <label className={styles.field}>
-                <span className={styles.label}>Contact Number *</span>
-                <input
-                  className={styles.input}
-                  name="contactNumber"
-                  value={employeeDetails.contactNumber}
-                  onChange={handleEmployeeChange}
-                  placeholder="Enter contact number"
-                  type="tel"
-                  required
-                />
-              </label>
+                <label className={styles.field}>
+                  <span className={styles.label}>Reporting Manager *</span>
+                  <input className={styles.input} name="reportingManager"
+                    value={employeeDetails.reportingManager} onChange={handleChange}
+                    placeholder="Enter reporting manager" required />
+                </label>
 
-              <label className={`${styles.field} ${styles.fieldWide}`}>
-                <span className={styles.label}>Email ID *</span>
-                <input
-                  className={styles.input}
-                  name="email"
-                  value={employeeDetails.email}
-                  onChange={handleEmployeeChange}
-                  placeholder="Enter email ID"
-                  type="email"
-                  required
-                />
-              </label>
+                <label className={styles.field}>
+                  <span className={styles.label}>Contact Number *</span>
+                  <input className={styles.input} name="contactNumber" type="tel"
+                    value={employeeDetails.contactNumber} onChange={handleChange}
+                    placeholder="Enter contact number" required />
+                </label>
 
-              <label className={`${styles.field} ${styles.fieldWide}`}>
-                <span className={styles.label}>Mode of Travel *</span>
-                <select
-                  className={styles.input}
-                  name="modeOfTravel"
-                  value={selectedOption}
-                  onChange={(event) => setSelectedOption(event.target.value as RequestOptionId)}
-                  required
-                >
-                  <option value="" disabled>
-                    Select mode of travel
-                  </option>
-                  {REQUEST_OPTIONS.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.title}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                <label className={`${styles.field} ${styles.fieldWide}`}>
+                  <span className={styles.label}>Email ID *</span>
+                  <input className={styles.input} name="email" type="email"
+                    value={employeeDetails.email} onChange={handleChange}
+                    placeholder="Enter email ID" required />
+                </label>
 
-              <div className={styles.actionsRow}>
+                <label className={`${styles.field} ${styles.fieldWide}`}>
+                  <span className={styles.label}>Mode of Travel *</span>
+                  <select className={styles.input} name="modeOfTravel"
+                    value={selectedOption}
+                    onChange={e => setSelectedOption(e.target.value as RequestOptionId)}
+                    required>
+                    <option value="" disabled>Select mode of travel</option>
+                    {REQUEST_OPTIONS.map(o => (
+                      <option key={o.id} value={o.id}>{o.title}</option>
+                    ))}
+                  </select>
+                </label>
+
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 24 }}>
                 <button type="submit" className={styles.primaryBtn} disabled={!selectedOption}>
                   {selectedRequest ? `Continue to ${selectedRequest.title}` : "Continue to Request Form"}
                 </button>
@@ -257,35 +198,37 @@ export default function TravelRequestOptionsPage() {
             </form>
           </section>
 
+          {/* ── SIDEBAR ──────────────────────────────────────── */}
           <aside className={styles.sideColumn}>
-            <section className={styles.selectionCard}>
-              <p className={styles.selectionLabel}>Current selection</p>
-              <h3 className={styles.selectionTitle}>{selectedRequest?.title ?? "No travel mode selected"}</h3>
-              <p className={styles.selectionDescription}>
+            <section className={styles.infoCard}>
+              <p className={styles.sectionEyebrow}>Current selection</p>
+              <h3 className={styles.selectionTitle}>
+                {selectedRequest?.title ?? "No travel mode selected"}
+              </h3>
+              <p className={styles.selectionDesc}>
                 {selectedRequest?.description ??
-                  "Choose the travel mode you want to raise after completing the employee details."}
+                  "Choose a travel mode from the dropdown or the cards below."}
               </p>
             </section>
 
-            <section className={styles.optionsSection}>
+            <section className={styles.infoCard}>
               <div className={styles.sectionHeader}>
-                <h2 className={styles.sectionTitle}>Available Request Types</h2>
-                <span className={styles.sectionMeta}>{REQUEST_OPTIONS.length} options</span>
+                <p className={styles.sectionEyebrow} style={{ marginBottom: 0 }}>Available options</p>
+                <span className={styles.typeChip}>{REQUEST_OPTIONS.length}</span>
               </div>
-
               <div className={styles.optionsGrid}>
-                {REQUEST_OPTIONS.map((option) => (
+                {REQUEST_OPTIONS.map(o => (
                   <button
-                    key={option.id}
+                    key={o.id}
                     type="button"
-                    className={`${styles.optionCard} ${selectedOption === option.id ? styles.optionCardActive : ""}`}
-                    onClick={() => setSelectedOption(option.id)}
+                    className={`${styles.optionCard} ${selectedOption === o.id ? styles.optionCardActive : ""}`}
+                    onClick={() => setSelectedOption(o.id)}
                   >
-                    <span className={styles.optionIcon}>{option.icon}</span>
-                    <span className={styles.optionTitle}>{option.title}</span>
-                    <span className={styles.optionDescription}>{option.description}</span>
+                    <span className={styles.optionIcon}>{o.icon}</span>
+                    <span className={styles.optionTitle}>{o.title}</span>
+                    <span className={styles.optionDesc}>{o.description}</span>
                     <span className={styles.optionTag}>
-                      {selectedOption === option.id ? "Selected" : "Choose"}
+                      {selectedOption === o.id ? "✓ Selected" : "Choose"}
                     </span>
                   </button>
                 ))}

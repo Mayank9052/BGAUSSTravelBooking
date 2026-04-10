@@ -3,14 +3,22 @@
 const BASE = "/api";
 
 function getToken(): string {
-  return localStorage.getItem("jwt_token") ?? "";
+  const token = localStorage.getItem("jwt_token") ?? "";
+  return token;
 }
 
 function authHeaders(): HeadersInit {
-  return {
-    "Content-Type":  "application/json",
-    "Authorization": `Bearer ${getToken()}`,
-  };
+  const token = getToken();
+  const headers: HeadersInit = { "Content-Type": "application/json" };
+  
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+    console.log("[API] ✅ JWT token found — sending in Authorization header");
+  } else {
+    console.warn("[API] ⚠️  No JWT token found in localStorage — requests will fail with 401");
+  }
+  
+  return headers;
 }
 
 // ✅ Custom error class that carries HTTP status
@@ -30,9 +38,7 @@ async function handleResponse<T>(res: Response): Promise<T> {
     const body = await res.json().catch(() => ({ message: `HTTP ${res.status}` })) as { message?: string };
     const message = body.message ?? `HTTP ${res.status}`;
 
-    // ✅ Throw ApiError with status — let the CALLER decide whether to redirect.
-    // Do NOT call window.location.replace here — it bypasses React Router
-    // and causes the redirect loop you're seeing.
+    // Throw ApiError with status — let the caller decide what to do
     throw new ApiError(message, res.status);
   }
 

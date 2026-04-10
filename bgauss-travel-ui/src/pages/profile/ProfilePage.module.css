@@ -1,0 +1,475 @@
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600&display=swap');
+
+/* ── Base ──────────────────────────────────────────────────────────────────── */
+.page {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(circle at top left, rgba(216, 59, 52, 0.07), transparent 28%),
+    linear-gradient(180deg, #f3f6fb 0%, #f8fafc 100%);
+  font-family: 'Barlow', system-ui, sans-serif;
+  color: #0f172a;
+}
+
+.main {
+  width: min(1060px, 100%);
+  margin: 0 auto;
+  padding: 28px clamp(14px, 2.5vw, 32px) 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  flex: 1;
+}
+
+/* ── Profile hero card ─────────────────────────────────────────────────────── */
+.profileHero {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  flex-wrap: wrap;
+  padding: 24px 28px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+}
+
+.avatar {
+  flex-shrink: 0;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 26px;
+  font-weight: 800;
+  color: #fff;
+}
+
+.heroInfo { flex: 1; min-width: 0; }
+
+.heroName {
+  margin: 0 0 8px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: clamp(20px, 2.8vw, 28px);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.heroBadges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.badge {
+  font-size: 11px;
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-weight: 600;
+}
+
+.badgeRole {
+  background: rgba(255, 255, 255, 0.15);
+  color: #e2e8f0;
+}
+
+.badgeMeta {
+  background: rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+}
+
+.backBtn {
+  flex-shrink: 0;
+  padding: 10px 20px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  border: 1.5px solid rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+
+.backBtn:hover { background: rgba(255, 255, 255, 0.18); }
+
+/* ── Stats row ─────────────────────────────────────────────────────────────── */
+.statsRow {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 14px;
+}
+
+.statCard {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 16px 18px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+  transition: transform 0.12s;
+}
+
+.statCard:hover { transform: translateY(-2px); }
+
+.statIcon { font-size: 18px; margin-bottom: 4px; }
+
+.statValue {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.statLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 2px;
+}
+
+/* ── Tabs ──────────────────────────────────────────────────────────────────── */
+.tabs {
+  display: flex;
+  gap: 4px;
+  background: #f1f5f9;
+  border-radius: 12px;
+  padding: 4px;
+  width: fit-content;
+}
+
+.tab {
+  padding: 9px 22px;
+  border-radius: 9px;
+  border: none;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+  background: transparent;
+  color: #64748b;
+}
+
+.tabActive {
+  background: #fff;
+  color: #1e40af;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* ── Content card ──────────────────────────────────────────────────────────── */
+.card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  padding: 24px 28px;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.05);
+}
+
+/* ── Section labels ────────────────────────────────────────────────────────── */
+.sectionLabel {
+  font-size: 10px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin: 0 0 18px;
+}
+
+/* ── Profile detail grid ───────────────────────────────────────────────────── */
+.detailGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+.detailItem {
+  border-bottom: 1px solid #f1f5f9;
+  padding-bottom: 14px;
+}
+
+.detailKey {
+  font-size: 10px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 4px;
+}
+
+.detailVal {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+  word-break: break-word;
+}
+
+/* ── Divider ───────────────────────────────────────────────────────────────── */
+.divider {
+  height: 1px;
+  background: #f1f5f9;
+  margin: 24px 0 20px;
+}
+
+/* ── Recent trips (overview) ───────────────────────────────────────────────── */
+.tripRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid #f8fafc;
+}
+
+.tripRow:last-child { border-bottom: none; }
+
+.tripDest {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.tripMeta {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 1px;
+}
+
+/* ── Approval history ──────────────────────────────────────────────────────── */
+.historyList {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.historyBlock {
+  border: 1px solid #f1f5f9;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.historyTrigger {
+  width: 100%;
+  padding: 14px 18px;
+  background: #f8fafc;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  text-align: left;
+  transition: background 0.12s;
+}
+
+.historyTrigger:hover { background: #f1f5f9; }
+
+.historyDest {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.historyCode {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+.historyRight {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.expandHint {
+  font-size: 11px;
+  color: #3b82f6;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.historyRows { padding: 12px 18px; }
+
+.historyRow {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 10px 0;
+  border-bottom: 1px solid #f8fafc;
+}
+
+.historyRow:last-child { border-bottom: none; }
+
+.historyAvatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.historyApproved { background: #dcfce7; }
+.historyRejected { background: #fef2f2; }
+
+.historyAction {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.historyBy { font-weight: 400; color: #64748b; }
+
+.historyComment {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 2px;
+  font-style: italic;
+}
+
+.historyDate {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+/* ── Expense table ─────────────────────────────────────────────────────────── */
+.tableWrap { overflow-x: auto; }
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.table th {
+  padding: 8px 12px;
+  text-align: left;
+  font-weight: 700;
+  color: #64748b;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 2px solid #f1f5f9;
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #f8fafc;
+  vertical-align: middle;
+}
+
+.table tr:last-child td { border-bottom: none; }
+.table tr:hover td { background: #fafbfd; }
+
+.codeCell  { font-weight: 700; color: #1e40af; white-space: nowrap; }
+.amtCell   { font-weight: 700; color: #0f172a; white-space: nowrap; }
+.noteCell  { color: #64748b; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Status badge ──────────────────────────────────────────────────────────── */
+.statusBadge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* ── Toolbar ───────────────────────────────────────────────────────────────── */
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.addBtn {
+  padding: 8px 18px;
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+}
+
+.addBtn:hover { opacity: 0.88; }
+
+/* ── Empty state ───────────────────────────────────────────────────────────── */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 48px 20px;
+  text-align: center;
+  color: #94a3b8;
+}
+
+.emptyIcon { font-size: 36px; margin-bottom: 10px; }
+
+.emptyTitle {
+  font-size: 15px;
+  font-weight: 700;
+  color: #334155;
+  margin: 0 0 4px;
+}
+
+.emptyText { font-size: 13px; margin: 0; }
+
+/* ── Loading ───────────────────────────────────────────────────────────────── */
+.loading {
+  font-size: 13px;
+  color: #94a3b8;
+  padding: 12px 0;
+}
+
+/* ── Responsive ────────────────────────────────────────────────────────────── */
+@media (max-width: 1024px) {
+  .statsRow { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (max-width: 768px) {
+  .main        { padding: 16px 14px 32px; gap: 16px; }
+  .profileHero { padding: 18px 20px; gap: 16px; }
+  .heroName    { font-size: 20px; }
+  .avatar      { width: 58px; height: 58px; font-size: 20px; }
+  .statsRow    { grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .statCard    { padding: 12px 14px; }
+  .statValue   { font-size: 22px; }
+  .detailGrid  { grid-template-columns: 1fr; gap: 14px; }
+  .card        { padding: 18px 20px; }
+  .tabs        { width: 100%; justify-content: stretch; }
+  .tab         { flex: 1; text-align: center; padding: 9px 10px; font-size: 12px; }
+}
+
+@media (max-width: 480px) {
+  .main        { padding: 12px 12px 28px; gap: 14px; }
+  .profileHero { padding: 16px; }
+  .heroName    { font-size: 18px; }
+  .avatar      { width: 50px; height: 50px; font-size: 17px; }
+  .statsRow    { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .statCard    { padding: 12px 12px; }
+  .statValue   { font-size: 20px; }
+  .card        { padding: 16px; }
+  .backBtn     { width: 100%; text-align: center; }
+  .profileHero { flex-direction: column; }
+}
