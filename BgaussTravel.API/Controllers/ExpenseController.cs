@@ -6,6 +6,7 @@ using BgaussTravel.API.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
+using System.IdentityModel.Tokens.Jwt;
 
 namespace BgaussTravel.API.Controllers;
 
@@ -27,8 +28,16 @@ public class ExpenseController : ControllerBase
     {
         get
         {
-            var val = User.FindFirstValue("EmployeeId");
-            return int.TryParse(val, out var id) ? id : 0;
+            try
+            {
+                var authHeader = Request.Headers["Authorization"].FirstOrDefault();
+                if (string.IsNullOrWhiteSpace(authHeader) || !authHeader.StartsWith("Bearer "))
+                    return 0;
+                var jwt = new JwtSecurityTokenHandler().ReadJwtToken(authHeader["Bearer ".Length..].Trim());
+                var val = jwt.Claims.FirstOrDefault(c => c.Type == "EmployeeId")?.Value;
+                return int.TryParse(val, out var id) ? id : 0;
+            }
+            catch { return 0; }
         }
     }
 
@@ -45,7 +54,6 @@ public class ExpenseController : ControllerBase
         ApprovedAt = e.ApprovedAt, ReimbursedAt = e.ReimbursedAt, CreatedAt = e.CreatedAt,
     };
 
-    // GET /api/Expense/summary
     [HttpGet("summary")]
     public async Task<IActionResult> Summary()
     {
@@ -53,17 +61,31 @@ public class ExpenseController : ControllerBase
         if (empId == 0) return Unauthorized(new { message = "Invalid token." });
 
         var isEmployee = CurrentRole == "Employee";
-        var q = _db.ExpenseClaims.Where(e => !isEmployee || e.EmployeeId == empId);
+
+        // ONE query: group by status, get count + sum together
+        var grouped = await _db.ExpenseClaims
+            .Where(e => !isEmployee || e.EmployeeId == empId)
+            .GroupBy(e => e.Status)
+            .Select(g => new
+            {
+                Status = g.Key,
+                Count  = g.Count(),
+                Total  = g.Sum(e => e.Amount),
+            })
+            .ToListAsync();
+
+        decimal Get(string s)  => grouped.FirstOrDefault(g => g.Status == s)?.Total ?? 0;
+        int     Count(string s) => grouped.FirstOrDefault(g => g.Status == s)?.Count ?? 0;
 
         return Ok(new ExpenseSummaryDto
         {
-            TotalPending    = await q.Where(e => e.Status == "Submitted").SumAsync(e => e.Amount),
-            TotalApproved   = await q.Where(e => e.Status == "Approved").SumAsync(e => e.Amount),
-            TotalReimbursed = await q.Where(e => e.Status == "Reimbursed").SumAsync(e => e.Amount),
-            PendingCount    = await q.CountAsync(e => e.Status == "Submitted"),
-            ApprovedCount   = await q.CountAsync(e => e.Status == "Approved"),
-            RejectedCount   = await q.CountAsync(e => e.Status == "Rejected"),
-            ReimbursedCount = await q.CountAsync(e => e.Status == "Reimbursed"),
+            TotalPending    = Get("Submitted"),
+            TotalApproved   = Get("Approved"),
+            TotalReimbursed = Get("Reimbursed"),
+            PendingCount    = Count("Submitted"),
+            ApprovedCount   = Count("Approved"),
+            RejectedCount   = Count("Rejected"),
+            ReimbursedCount = Count("Reimbursed"),
         });
     }
 
@@ -85,16 +107,41 @@ public class ExpenseController : ControllerBase
     // GET /api/Expense  (Admin/HR — role checked on frontend)
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] string? status,
-                                            [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+                                            [FromQuery] int page = 1,
+                                            [FromQuery] int pageSize = 50)  // ← cap default
     {
-        var q = _db.ExpenseClaims.Include(e => e.Employee).Include(e => e.Request).AsQueryable();
-        if (!string.IsNullOrWhiteSpace(status)) q = q.Where(e => e.Status == status);
+        var q = _db.ExpenseClaims
+            .Where(e => string.IsNullOrWhiteSpace(status) || e.Status == status)
+            .Select(e => new ExpenseClaimResponseDto
+            {
+                ClaimId         = e.ClaimId,
+                ClaimCode       = e.ClaimCode,
+                RequestId       = e.RequestId,
+                RequestCode     = e.Request.RequestCode,    // EF projects this without full Include
+                EmployeeId      = e.EmployeeId,
+                EmployeeName    = e.Employee.DisplayName,   // same — projected only
+                Category        = e.Category,
+                Amount          = e.Amount,
+                Currency        = e.Currency,
+                ExpenseDate     = e.ExpenseDate,
+                Description     = e.Description,
+                BillPath        = e.BillPath,
+                BillFileName    = e.BillFileName,
+                Status          = e.Status,
+                RejectionReason = e.RejectionReason,
+                ApprovedAt      = e.ApprovedAt,
+                ReimbursedAt    = e.ReimbursedAt,
+                CreatedAt       = e.CreatedAt,
+            });
 
         var total = await q.CountAsync();
-        var items = await q.OrderByDescending(e => e.CreatedAt)
-                           .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync();
+        var items = await q
+            .OrderByDescending(e => e.CreatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
 
-        return Ok(new { total, page, pageSize, items = items.Select(e => ToDto(e, e.Request?.RequestCode)) });
+        return Ok(new { total, page, pageSize, items });
     }
 
     // GET /api/Expense/{id}

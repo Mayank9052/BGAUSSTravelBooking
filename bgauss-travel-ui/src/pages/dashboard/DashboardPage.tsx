@@ -7,16 +7,21 @@ import CommonNavbar from "../../components/layout/CommonNavbar";
 import { bookingService } from "../../services/bookingService";
 import { expenseService } from "../../services/expenseService";
 import { approvalService } from "../../services/approvalService";
-import type { ApprovalSummary } from "../../services/approvalService";           // ← NEW import
+import type { ApprovalSummary } from "../../services/approvalService";
 import { notificationService, buildNotificationConnection } from "../../services/notificationService";
+import { get, put } from "../../services/apiClient";
+import { useState as useStateLocal } from "react";
 import type {
   TravelRequestResponse,
   ExpenseSummaryResponse,
+  ExpenseClaimResponse,
   NotificationResponse,
   ApprovalResponse,
 } from "../../services/apiClient";
 import type { HubConnection } from "@microsoft/signalr";
 import styles from "./DashboardPage.module.css";
+
+// ── Constants ─────────────────────────────────────────────────────────────────
 
 const TRANSPORT_ICONS: Record<string, string> = {
   Flight: "✈️", Train: "🚆", Cab: "🚕", Hotel: "🏨", Multiple: "🗺️",
@@ -31,13 +36,169 @@ const STATUS_COLORS: Record<string, string> = {
   Reimbursed:  styles.statusReimbursed,
 };
 
+// Inline badge style helper — used in admin expense table & history
+const expenseBadgeStyle = (status: string): React.CSSProperties => ({
+  padding: "3px 10px",
+  borderRadius: 20,
+  fontSize: 11,
+  fontWeight: 700,
+  background:
+    status === "Approved"   ? "#dcfce7" :
+    status === "Rejected"   ? "#fee2e2" :
+    status === "Reimbursed" ? "#ede9fe" : "#fef3c7",
+  color:
+    status === "Approved"   ? "#15803d" :
+    status === "Rejected"   ? "#b91c1c" :
+    status === "Reimbursed" ? "#6d28d9" : "#92400e",
+});
+
 const fmtDate = (d: string | null | undefined) => {
   if (!d) return "—";
-  try { return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" }); }
-  catch { return d; }
+  try {
+    return new Date(d).toLocaleDateString("en-IN", {
+      day: "2-digit", month: "short", year: "2-digit",
+    });
+  } catch { return d; }
 };
 
-// ── Approval history drawer ───────────────────────────────────────────────────
+const fmtAmount = (amt: number, currency = "INR") =>
+  `₹${amt.toLocaleString("en-IN")}${currency !== "INR" ? ` ${currency}` : ""}`;
+
+
+// ── Bill cell with hover preview & download ─────────────────────────────────
+function BillCell({ billPath, billFileName }: { billPath: string | null; billFileName: string | null }) {
+  const [hovered, setHovered] = useState(false);
+
+  if (!billPath) {
+    return <span style={{ fontSize: 11, color: "#f59e0b", fontWeight: 600 }}>⚠ No bill</span>;
+  }
+
+  const isImage = /\.(jpg|jpeg|png|webp)$/i.test(billPath);
+  const label   = billFileName
+    ? billFileName.length > 18 ? billFileName.slice(0, 18) + "…" : billFileName
+    : "View Bill";
+
+  // Build absolute URL — bill path is like /uploads/bills/xxx.jpg
+  const fullUrl = billPath.startsWith("http") ? billPath : `${window.location.origin}${billPath}`;
+
+  return (
+    <div style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 6 }}>
+
+      {/* ── View link with hover ── */}
+      <a
+        href={fullUrl}
+        target="_blank"
+        rel="noreferrer"
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        style={{
+          fontSize: 11, color: "#3b82f6", fontWeight: 600,
+          textDecoration: "none", whiteSpace: "nowrap",
+          display: "inline-flex", alignItems: "center", gap: 4,
+        }}>
+        📎 {label}
+      </a>
+
+      {/* ── Download button ── */}
+      <a
+        href={fullUrl}
+        download={billFileName ?? "bill"}
+        title="Download bill"
+        style={{
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
+          width: 22, height: 22, borderRadius: 6,
+          background: "#f1f5f9", border: "1px solid #e2e8f0",
+          color: "#64748b", textDecoration: "none", fontSize: 12,
+          flexShrink: 0, transition: "background 0.15s",
+        }}
+        onMouseEnter={e => (e.currentTarget.style.background = "#dbeafe")}
+        onMouseLeave={e => (e.currentTarget.style.background = "#f1f5f9")}>
+        ⬇
+      </a>
+
+      {/* ── Hover preview tooltip — only for images ── */}
+      {hovered && isImage && (
+        <div style={{
+          position: "absolute",
+          bottom: "calc(100% + 10px)",
+          left: "50%",
+          transform: "translateX(-50%)",
+          zIndex: 999,
+          background: "#fff",
+          border: "1.5px solid #e2e8f0",
+          borderRadius: 12,
+          boxShadow: "0 12px 40px rgba(0,0,0,0.18)",
+          padding: 8,
+          pointerEvents: "none",
+          width: 200,
+        }}>
+          {/* Arrow */}
+          <div style={{
+            position: "absolute", bottom: -8, left: "50%", transform: "translateX(-50%)",
+            width: 0, height: 0,
+            borderLeft: "8px solid transparent",
+            borderRight: "8px solid transparent",
+            borderTop: "8px solid #e2e8f0",
+          }} />
+          <div style={{
+            position: "absolute", bottom: -7, left: "50%", transform: "translateX(-50%)",
+            width: 0, height: 0,
+            borderLeft: "7px solid transparent",
+            borderRight: "7px solid transparent",
+            borderTop: "7px solid #fff",
+          }} />
+          <img
+            src={fullUrl}
+            alt={billFileName ?? "Bill"}
+            style={{
+              width: "100%", height: 160, objectFit: "cover",
+              borderRadius: 8, display: "block",
+            }}
+          />
+          <p style={{
+            margin: "6px 0 0", fontSize: 10, color: "#64748b",
+            textAlign: "center", overflow: "hidden",
+            textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>
+            {billFileName ?? "Bill"}
+          </p>
+        </div>
+      )}
+
+      {/* ── For PDF: show a tooltip label instead of image ── */}
+      {hovered && !isImage && (
+        <div style={{
+          position: "absolute",
+          bottom: "calc(100% + 10px)",
+          left: "50%",
+          transform: "translateX(-50%)",
+          zIndex: 999,
+          background: "#0f172a",
+          color: "#fff",
+          borderRadius: 8,
+          padding: "6px 12px",
+          fontSize: 11,
+          fontWeight: 600,
+          whiteSpace: "nowrap",
+          pointerEvents: "none",
+          boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
+        }}>
+          📄 {billFileName ?? "PDF Document"} — click to view
+          <div style={{
+            position: "absolute", bottom: -6, left: "50%", transform: "translateX(-50%)",
+            width: 0, height: 0,
+            borderLeft: "6px solid transparent",
+            borderRight: "6px solid transparent",
+            borderTop: "6px solid #0f172a",
+          }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Approval history drawer (travel requests) ─────────────────────────────────
+
 function ApprovalHistoryDrawer({
   requestId, histories, loadingId,
 }: {
@@ -65,6 +226,8 @@ function ApprovalHistoryDrawer({
   );
 }
 
+// ── Main Component ────────────────────────────────────────────────────────────
+
 export default function DashboardPage() {
   const navigate = useNavigate();
   const { signOut } = useMsalLogin();
@@ -80,24 +243,24 @@ export default function DashboardPage() {
   const normalizedRole = role.toLowerCase();
   const isAdminOrHr    = normalizedRole === "admin" || normalizedRole === "hr";
 
-  // ── Core data ──────────────────────────────────────────────────────────────
-  const [trips,          setTrips]          = useState<TravelRequestResponse[]>([]);
-  const [summary,        setSummary]        = useState<ExpenseSummaryResponse | null>(null);
-  const [notifications,  setNotifications]  = useState<NotificationResponse[]>([]);
-  const [unreadCount,    setUnreadCount]    = useState(0);
-  const [showNotifDrop,  setShowNotifDrop]  = useState(false);
-  const [pendingReqs,    setPendingReqs]    = useState<TravelRequestResponse[]>([]);
-  const [pendingExps,    setPendingExps]    = useState<unknown[]>([]);
-  const [resolvedReqs,   setResolvedReqs]   = useState<TravelRequestResponse[]>([]);
-  const [loading,        setLoading]        = useState(true);
-  const [activeTab,      setActiveTab]      = useState<"trips" | "expenses" | "approvals">("trips");
-  const [actionId,       setActionId]       = useState<number | null>(null);
-
-  // ── NEW: approval summary from backend (replaces client-side counting) ─────
+  // ── State ──────────────────────────────────────────────────────────────────
+  const [trips,           setTrips]           = useState<TravelRequestResponse[]>([]);
+  const [summary,         setSummary]         = useState<ExpenseSummaryResponse | null>(null);
+  const [notifications,   setNotifications]   = useState<NotificationResponse[]>([]);
+  const [unreadCount,     setUnreadCount]     = useState(0);
+  const [showNotifDrop,   setShowNotifDrop]   = useState(false);
+  const [pendingReqs,     setPendingReqs]     = useState<TravelRequestResponse[]>([]);
+  const [resolvedReqs,    setResolvedReqs]    = useState<TravelRequestResponse[]>([]);
+  const [allExpenses,     setAllExpenses]     = useState<ExpenseClaimResponse[]>([]);   // Admin: ALL claims
+  const [loading,         setLoading]         = useState(true);
+  const [activeTab,       setActiveTab]       = useState<"trips" | "expenses" | "approvals">("trips");
+  const [actionId,        setActionId]        = useState<number | null>(null);
+  const [expActionId,     setExpActionId]     = useState<number | null>(null);         // expense row action
   const [approvalSummary, setApprovalSummary] = useState<ApprovalSummary | null>(null);
 
-  // ── HR/Admin sub-tab ───────────────────────────────────────────────────────
+  // Approvals sub-tabs & expandable history
   const [approvalSubTab,   setApprovalSubTab]   = useState<"pending" | "history">("pending");
+  const [historyKind,      setHistoryKind]      = useState<"requests" | "expenses">("requests"); // ← NEW
   const [expandedTripId,   setExpandedTripId]   = useState<number | null>(null);
   const [tripHistories,    setTripHistories]    = useState<Record<number, ApprovalResponse[]>>({});
   const [historyLoadingId, setHistoryLoadingId] = useState<number | null>(null);
@@ -124,18 +287,26 @@ export default function DashboardPage() {
       }
 
       if (isAdminOrHr) {
-        // Single call returns counts + resolvedRequests — no bookingService.getAllResolved() needed
-        const [pendingRes, approvalSumRes] = await Promise.allSettled([
+        const [pendingRes, approvalSumRes, expRes] = await Promise.allSettled([
           approvalService.pending(),
-          approvalService.summary(),          // ← NEW
+          approvalService.summary(),
+          // Fetch ALL expense claims for the admin expenses tab
+          get<{ total: number; items: ExpenseClaimResponse[] }>("/Expense?pageSize=50"),
         ]);
+
         if (pendingRes.status === "fulfilled") {
           setPendingReqs(pendingRes.value.pendingRequests ?? []);
-          setPendingExps(pendingRes.value.pendingExpenses as unknown[] ?? []);
         }
+
         if (approvalSumRes.status === "fulfilled") {
           setApprovalSummary(approvalSumRes.value);
-          setResolvedReqs(approvalSumRes.value.resolvedRequests ?? []); // ← feeds History tab
+          // resolvedRequests is embedded in the summary response
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          setResolvedReqs((approvalSumRes.value as any).resolvedRequests ?? []);
+        }
+
+        if (expRes.status === "fulfilled") {
+          setAllExpenses(expRes.value.items ?? []);
         }
       }
     } catch { /* silent */ }
@@ -157,16 +328,16 @@ export default function DashboardPage() {
     conn.on("ReceiveNotification", (notif: NotificationResponse) => {
       setNotifications(prev => [notif, ...prev]);
       setUnreadCount(c => c + 1);
-      if (notif.type === "TravelRequest") {
+      if (notif.type === "TravelRequest" || notif.type === "ExpenseClaim") {
         void loadDashboard(false);
         if (notif.requestId) {
           setTripHistories(prev => { const n = { ...prev }; delete n[notif.requestId!]; return n; });
         }
-        setLiveToast(notif.title ?? "Travel request updated");
+        setLiveToast(notif.title ?? "Update received");
         setTimeout(() => setLiveToast(null), 4000);
       }
     });
-    conn.start().catch(() => { /* SignalR unavailable — silent */ });
+    conn.start().catch(() => { /* SignalR unavailable */ });
     return () => { void conn.stop(); signalRRef.current = null; };
   }, [loadDashboard]);
 
@@ -181,6 +352,7 @@ export default function DashboardPage() {
     return () => { clearTimeout(t); document.removeEventListener("mousedown", close); };
   }, [showNotifDrop]);
 
+  // ── Handlers ───────────────────────────────────────────────────────────────
   const handleMarkRead = async (id: number) => {
     try {
       await notificationService.markRead(id);
@@ -208,6 +380,21 @@ export default function DashboardPage() {
     } finally { setActionId(null); }
   };
 
+  // Admin: approve / reject / reimburse an expense claim
+  const handleExpenseAction = async (claimId: number, action: "approve" | "reject" | "reimburse") => {
+    setExpActionId(claimId);
+    try {
+      if (action === "reimburse") {
+        await put<unknown>(`/Expense/${claimId}/reimburse`);
+      } else {
+        await put<unknown>(`/Expense/${claimId}/approve`, { action });
+      }
+      void loadDashboard(false);
+    } catch (err) {
+      alert(`Action failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally { setExpActionId(null); }
+  };
+
   const handleToggleHistory = async (requestId: number) => {
     if (expandedTripId === requestId) { setExpandedTripId(null); return; }
     setExpandedTripId(requestId);
@@ -221,6 +408,7 @@ export default function DashboardPage() {
     } finally { setHistoryLoadingId(null); }
   };
 
+  // ── Nav items ──────────────────────────────────────────────────────────────
   const navItems = [
     { id: "trips",    label: "My Trips",  active: activeTab === "trips",    onClick: () => setActiveTab("trips") },
     { id: "expenses", label: "Expenses",  active: activeTab === "expenses", onClick: () => setActiveTab("expenses") },
@@ -245,7 +433,9 @@ export default function DashboardPage() {
           <div className={styles.tripIcon}>{TRANSPORT_ICONS[r.transportType] ?? "🚗"}</div>
           <div className={styles.tripInfo} style={{ flex: 1 }}>
             <div className={styles.tripDest}>{r.destination}</div>
-            <div className={styles.tripCode}>{r.requestCode}{showEmployee && r.employeeName ? ` · ${r.employeeName}` : ""}</div>
+            <div className={styles.tripCode}>
+              {r.requestCode}{showEmployee && r.employeeName ? ` · ${r.employeeName}` : ""}
+            </div>
             <div className={styles.tripDates}>{fmtDate(r.departureDate)} → {fmtDate(r.returnDate)}</div>
           </div>
           <div className={styles.tripRight} style={{ alignItems: "flex-end", gap: 6 }}>
@@ -255,12 +445,14 @@ export default function DashboardPage() {
             )}
             {showApproveButtons && (
               <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-                <button onClick={e => { e.stopPropagation(); void handleApproveRequest(r.requestId, "approve"); }}
+                <button
+                  onClick={e => { e.stopPropagation(); void handleApproveRequest(r.requestId, "approve"); }}
                   disabled={actionId === r.requestId}
                   style={{ padding: "5px 12px", background: actionId === r.requestId ? "#86efac" : "#22c55e", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 11, cursor: actionId === r.requestId ? "not-allowed" : "pointer" }}>
                   {actionId === r.requestId ? "…" : "Approve"}
                 </button>
-                <button onClick={e => { e.stopPropagation(); void handleApproveRequest(r.requestId, "reject"); }}
+                <button
+                  onClick={e => { e.stopPropagation(); void handleApproveRequest(r.requestId, "reject"); }}
                   disabled={actionId === r.requestId}
                   style={{ padding: "5px 12px", background: actionId === r.requestId ? "#fca5a5" : "#ef4444", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 11, cursor: actionId === r.requestId ? "not-allowed" : "pointer" }}>
                   {actionId === r.requestId ? "…" : "Reject"}
@@ -268,7 +460,8 @@ export default function DashboardPage() {
               </div>
             )}
             {isDone && (
-              <button onClick={() => void handleToggleHistory(r.requestId)}
+              <button
+                onClick={() => void handleToggleHistory(r.requestId)}
                 style={{ fontSize: 10, color: "#3b82f6", background: "none", border: "none", cursor: "pointer", padding: "2px 0", fontWeight: 600, marginTop: 2 }}>
                 {isExpanded ? "▲ hide" : "▼ who actioned"}
               </button>
@@ -284,9 +477,8 @@ export default function DashboardPage() {
     );
   };
 
-  // ── Role-aware stat cards ──────────────────────────────────────────────────
-  // Employee: personal trip + expense numbers from bookingService.getMy() + expenseService.summary()
-  // HR/Admin: org-wide counts from approvalService.summary() — computed server-side, no client filtering
+  // ── Stat cards ─────────────────────────────────────────────────────────────
+  // Employee: personal counts from their own trips + expense summary
   const employeeStatCards = [
     { label: "Total Trips",    value: loading ? "—" : String(trips.length),                                        color: styles.statBlue,   icon: "✈️" },
     { label: "Approved",       value: loading ? "—" : String(trips.filter(t => t.status === "Approved").length),   color: styles.statGreen,  icon: "✅" },
@@ -294,7 +486,7 @@ export default function DashboardPage() {
     { label: "Reimbursed",     value: loading ? "—" : `₹${((summary?.totalReimbursed ?? 0) / 1000).toFixed(1)}K`, color: styles.statPurple, icon: "💰" },
   ];
 
-  // All four numbers come directly from the backend summary — no client-side array filtering
+  // Admin/HR: org-wide counts from backend summary — all employees combined
   const adminStatCards = [
     {
       label: "Pending Approvals",
@@ -313,12 +505,16 @@ export default function DashboardPage() {
     },
     {
       label: "Expense Pipeline",
-      value: loading || !approvalSummary ? "—" : `₹${(approvalSummary.expensePipeline / 1000).toFixed(1)}K`,
+      value: loading || !approvalSummary ? "—" : `₹${((approvalSummary.expensePipeline ?? 0) / 1000).toFixed(1)}K`,
       color: styles.statPurple, icon: "💰",
     },
   ];
 
   const statCards = isAdminOrHr ? adminStatCards : employeeStatCards;
+
+  // Derived expense slices for admin Expenses tab
+  const pendingExpenses  = allExpenses.filter(e => e.status === "Submitted");
+  const resolvedExpenses = allExpenses.filter(e => e.status !== "Submitted");
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -330,6 +526,7 @@ export default function DashboardPage() {
         onSignOut={async () => signOut()}
       />
 
+      {/* Live toast */}
       {liveToast && (
         <div style={{
           position: "fixed", top: 64, left: "50%", transform: "translateX(-50%)",
@@ -342,8 +539,11 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* Notification bell */}
       <div ref={notifDropRef} style={{ position: "fixed", top: 14, right: 180, zIndex: 400 }}>
-        <button onClick={() => setShowNotifDrop(v => !v)} title="Notifications"
+        <button
+          onClick={() => setShowNotifDrop(v => !v)}
+          title="Notifications"
           style={{ position: "relative", background: "none", border: "none", cursor: "pointer", padding: 8 }}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2">
             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
@@ -355,17 +555,24 @@ export default function DashboardPage() {
             </span>
           )}
         </button>
+
         {showNotifDrop && (
           <div style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, width: 320, background: "#fff", borderRadius: 14, border: "1.5px solid #e5e7eb", boxShadow: "0 12px 40px rgba(0,0,0,0.14)", zIndex: 500, overflow: "hidden" }}>
             <div style={{ padding: "12px 16px", borderBottom: "1px solid #f1f5f9", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span style={{ fontWeight: 700, fontSize: 14, color: "#0f172a" }}>Notifications</span>
-              {unreadCount > 0 && <button onClick={handleMarkAllRead} style={{ fontSize: 11, color: "#3b82f6", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>Mark all read</button>}
+              {unreadCount > 0 && (
+                <button onClick={handleMarkAllRead} style={{ fontSize: 11, color: "#3b82f6", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>
+                  Mark all read
+                </button>
+              )}
             </div>
             <div style={{ maxHeight: 320, overflowY: "auto" }}>
               {notifications.length === 0 ? (
                 <div style={{ padding: "32px 16px", textAlign: "center", color: "#94a3b8", fontSize: 13 }}>No notifications</div>
               ) : notifications.map(n => (
-                <div key={n.notificationId} onClick={() => void handleMarkRead(n.notificationId)}
+                <div
+                  key={n.notificationId}
+                  onClick={() => void handleMarkRead(n.notificationId)}
                   style={{ padding: "12px 16px", borderBottom: "1px solid #f8fafc", cursor: "pointer", background: n.isRead ? "transparent" : "#eff6ff" }}>
                   <div style={{ fontWeight: n.isRead ? 500 : 700, fontSize: 13, color: "#0f172a" }}>{n.title}</div>
                   <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>{n.message}</div>
@@ -379,6 +586,7 @@ export default function DashboardPage() {
 
       <main className={styles.main}>
 
+        {/* Welcome banner */}
         <div className={styles.welcomeBanner}>
           <div className={styles.welcomeText}>
             <h1 className={styles.welcomeH1}>Good day, {fullName.split(" ")[0]} 👋</h1>
@@ -390,7 +598,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* ── Stat cards ── */}
+        {/* Stat cards — employee shows personal, admin shows org-wide */}
         <div className={styles.statsRow}>
           {statCards.map(s => (
             <div key={s.label} className={`${styles.statCard} ${s.color}`}>
@@ -401,13 +609,16 @@ export default function DashboardPage() {
           ))}
         </div>
 
-        {/* MY TRIPS */}
+        {/* ══════════════ MY TRIPS ══════════════ */}
         {activeTab === "trips" && (
           <div className={styles.section}>
             <div className={styles.sectionHeader}>
               <h2 className={styles.sectionTitle}>Travel Requests</h2>
-              <span style={{ fontSize: 12, fontWeight: 700, background: "#f1f5f9", color: "#64748b", borderRadius: 20, padding: "3px 12px" }}>{trips.length}</span>
+              <span style={{ fontSize: 12, fontWeight: 700, background: "#f1f5f9", color: "#64748b", borderRadius: 20, padding: "3px 12px" }}>
+                {trips.length}
+              </span>
             </div>
+
             {loading ? (
               <div className={styles.loadingRow}>{[1, 2, 3].map(i => <div key={i} className={styles.skeleton} />)}</div>
             ) : trips.length === 0 ? (
@@ -425,44 +636,97 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* EXPENSES */}
+        {/* ══════════════ EXPENSES ══════════════ */}
         {activeTab === "expenses" && (
           <div className={styles.section}>
             <div className={styles.sectionHeader}>
-              <h2 className={styles.sectionTitle}>Expense Claims</h2>
-              <button className={styles.btnOutline} onClick={() => navigate("/expense/submit")}>+ Submit Expense</button>
+              <h2 className={styles.sectionTitle}>
+                {isAdminOrHr ? "Expense Claims — All Employees" : "Expense Claims"}
+              </h2>
+              {!isAdminOrHr && (
+                <button className={styles.btnOutline} onClick={() => navigate("/expense/submit")}>+ Submit Expense</button>
+              )}
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 12, padding: "20px 24px" }}>
-              {[
-                { label: "Pending",    val: summary?.pendingCount    ?? 0, amt: summary?.totalPending    ?? 0, color: "#f59e0b" },
-                { label: "Approved",   val: summary?.approvedCount   ?? 0, amt: summary?.totalApproved   ?? 0, color: "#22c55e" },
-                { label: "Rejected",   val: summary?.rejectedCount   ?? 0, amt: 0,                            color: "#ef4444" },
-                { label: "Reimbursed", val: summary?.reimbursedCount ?? 0, amt: summary?.totalReimbursed ?? 0, color: "#8b5cf6" },
-              ].map(e => (
-                <div key={e.label} style={{ background: "#f8fafc", borderRadius: 12, padding: "14px 16px", border: `1.5px solid ${e.color}22` }}>
-                  <div style={{ fontSize: 22, fontWeight: 900, color: e.color }}>{e.val}</div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "#64748b" }}>{e.label}</div>
-                  {e.amt > 0 && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>₹{(e.amt / 1000).toFixed(1)}K</div>}
+
+            {/* ── Employee: personal summary cards ── */}
+            {!isAdminOrHr && (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 12, padding: "20px 24px" }}>
+                  {[
+                    { label: "Pending",    val: summary?.pendingCount    ?? 0, amt: summary?.totalPending    ?? 0, color: "#f59e0b" },
+                    { label: "Approved",   val: summary?.approvedCount   ?? 0, amt: summary?.totalApproved   ?? 0, color: "#22c55e" },
+                    { label: "Rejected",   val: summary?.rejectedCount   ?? 0, amt: 0,                            color: "#ef4444" },
+                    { label: "Reimbursed", val: summary?.reimbursedCount ?? 0, amt: summary?.totalReimbursed ?? 0, color: "#8b5cf6" },
+                  ].map(e => (
+                    <div key={e.label} style={{ background: "#f8fafc", borderRadius: 12, padding: "14px 16px", border: `1.5px solid ${e.color}22` }}>
+                      <div style={{ fontSize: 22, fontWeight: 900, color: e.color }}>{e.val}</div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "#64748b" }}>{e.label}</div>
+                      {e.amt > 0 && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>₹{(e.amt / 1000).toFixed(1)}K</div>}
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-            <div className={styles.emptyState} style={{ paddingTop: 16, paddingBottom: 32 }}>
-              <div className={styles.emptyIcon}>🧾</div>
-              <p className={styles.emptyTitle}>Expense history</p>
-              <p className={styles.emptySub}>Upload bills and track reimbursements.</p>
-              <button className={styles.btnPrimary} style={{ marginTop: 12 }} onClick={() => navigate("/expense/submit")}>Submit New Expense</button>
-            </div>
+                <div className={styles.emptyState} style={{ paddingTop: 16, paddingBottom: 32 }}>
+                  <div className={styles.emptyIcon}>🧾</div>
+                  <p className={styles.emptyTitle}>Expense history</p>
+                  <p className={styles.emptySub}>Upload bills and track reimbursements.</p>
+                  <button className={styles.btnPrimary} style={{ marginTop: 12 }} onClick={() => navigate("/expense/submit")}>Submit New Expense</button>
+                </div>
+              </>
+            )}
+
+            {/* ── Admin/HR: pending approvals section + full list with bills ── */}
+            {isAdminOrHr && (
+              <>
+                {/* Pending expense approvals */}
+                <div style={{ padding: "16px 24px 0" }}>
+                  <p style={{ fontSize: 12, fontWeight: 700, color: "#f59e0b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 10 }}>
+                    ⏳ Awaiting Approval ({pendingExpenses.length})
+                  </p>
+                  {pendingExpenses.length === 0 ? (
+                    <div style={{ padding: "16px 0", color: "#94a3b8", fontSize: 13 }}>No pending expense claims.</div>
+                  ) : (
+                    <ExpenseTable
+                      expenses={pendingExpenses}
+                      expActionId={expActionId}
+                      onAction={handleExpenseAction}
+                    />
+                  )}
+                </div>
+
+                {/* Divider */}
+                <div style={{ margin: "20px 24px", borderTop: "1.5px solid #f1f5f9" }} />
+
+                {/* Full claims list */}
+                <div style={{ padding: "0 24px 24px" }}>
+                  <p style={{ fontSize: 12, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 10 }}>
+                    📋 All Claims ({allExpenses.length})
+                  </p>
+                  {allExpenses.length === 0 ? (
+                    <div style={{ padding: "16px 0", color: "#94a3b8", fontSize: 13 }}>No expense claims submitted yet.</div>
+                  ) : (
+                    <ExpenseTable
+                      expenses={allExpenses}
+                      expActionId={expActionId}
+                      onAction={handleExpenseAction}
+                      showAll
+                    />
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )}
 
-        {/* APPROVALS (HR/Admin) */}
-        {activeTab === "approvals" && (
+        {/* ══════════════ APPROVALS (HR/Admin) ══════════════ */}
+        {activeTab === "approvals" && isAdminOrHr && (
           <div className={styles.section}>
             <div className={styles.sectionHeader}>
               <h2 className={styles.sectionTitle}>Approvals</h2>
               <div style={{ display: "flex", gap: 6 }}>
                 {(["pending", "history"] as const).map(tab => (
-                  <button key={tab} onClick={() => setApprovalSubTab(tab)}
+                  <button
+                    key={tab}
+                    onClick={() => setApprovalSubTab(tab)}
                     style={{
                       padding: "4px 14px", borderRadius: 20, fontSize: 12, fontWeight: 700,
                       cursor: "pointer", border: "none",
@@ -471,18 +735,19 @@ export default function DashboardPage() {
                     }}>
                     {tab === "pending"
                       ? `Pending${pendingReqs.length > 0 ? ` (${pendingReqs.length})` : ""}`
-                      : `History${resolvedReqs.length > 0 ? ` (${resolvedReqs.length})` : ""}`}
+                      : `History`}
                   </button>
                 ))}
               </div>
             </div>
 
+            {/* ── Pending: travel requests only ── */}
             {approvalSubTab === "pending" && (
-              pendingReqs.length === 0 && pendingExps.length === 0 ? (
+              pendingReqs.length === 0 ? (
                 <div className={styles.emptyState}>
                   <div className={styles.emptyIcon}>✅</div>
                   <p className={styles.emptyTitle}>All caught up!</p>
-                  <p className={styles.emptySub}>No pending approvals right now.</p>
+                  <p className={styles.emptySub}>No pending travel request approvals.</p>
                 </div>
               ) : (
                 <div className={styles.tripsList}>
@@ -493,20 +758,65 @@ export default function DashboardPage() {
               )
             )}
 
+            {/* ── History: requests + expense claims with kind toggle ── */}
             {approvalSubTab === "history" && (
-              resolvedReqs.length === 0 ? (
-                <div className={styles.emptyState}>
-                  <div className={styles.emptyIcon}>📋</div>
-                  <p className={styles.emptyTitle}>No history yet</p>
-                  <p className={styles.emptySub}>Approved and rejected requests will appear here.</p>
-                </div>
-              ) : (
-                <div className={styles.tripsList}>
-                  {resolvedReqs.map(r => (
-                    <TripCardWithHistory key={r.requestId} r={r} showEmployee />
+              <>
+                {/* Kind toggle */}
+                <div style={{ display: "flex", gap: 6, padding: "0 24px 16px" }}>
+                  {(["requests", "expenses"] as const).map(k => (
+                    <button
+                      key={k}
+                      onClick={() => setHistoryKind(k)}
+                      style={{
+                        padding: "4px 14px", borderRadius: 20, fontSize: 12, fontWeight: 700,
+                        cursor: "pointer", border: "none",
+                        background: historyKind === k ? "#3b82f6" : "#f1f5f9",
+                        color:      historyKind === k ? "#fff"    : "#64748b",
+                      }}>
+                      {k === "requests"
+                        ? `✈️ Travel Requests (${resolvedReqs.length})`
+                        : `🧾 Expense Claims (${resolvedExpenses.length})`}
+                    </button>
                   ))}
                 </div>
-              )
+
+                {/* Travel request history */}
+                {historyKind === "requests" && (
+                  resolvedReqs.length === 0 ? (
+                    <div className={styles.emptyState}>
+                      <div className={styles.emptyIcon}>📋</div>
+                      <p className={styles.emptyTitle}>No travel request history yet</p>
+                      <p className={styles.emptySub}>Approved and rejected requests will appear here.</p>
+                    </div>
+                  ) : (
+                    <div className={styles.tripsList}>
+                      {resolvedReqs.map(r => (
+                        <TripCardWithHistory key={r.requestId} r={r} showEmployee />
+                      ))}
+                    </div>
+                  )
+                )}
+
+                {/* Expense claim history */}
+                {historyKind === "expenses" && (
+                  resolvedExpenses.length === 0 ? (
+                    <div className={styles.emptyState}>
+                      <div className={styles.emptyIcon}>🧾</div>
+                      <p className={styles.emptyTitle}>No expense claim history yet</p>
+                      <p className={styles.emptySub}>Approved, rejected, and reimbursed claims appear here.</p>
+                    </div>
+                  ) : (
+                    <div style={{ padding: "0 24px 24px" }}>
+                      <ExpenseTable
+                        expenses={resolvedExpenses}
+                        expActionId={expActionId}
+                        onAction={handleExpenseAction}
+                        showAll
+                      />
+                    </div>
+                  )
+                )}
+              </>
             )}
           </div>
         )}
@@ -521,8 +831,12 @@ export default function DashboardPage() {
               { icon: "📊", label: "View Reports",   sub: "Download reports",   path: "/reports"        },
               { icon: "👤", label: "My Profile",     sub: "Account details",    path: "/profile"        },
             ].map(qa => (
-              <div key={qa.label} className={styles.quickCard}
-                onClick={() => navigate(qa.path)} role="button" tabIndex={0}
+              <div
+                key={qa.label}
+                className={styles.quickCard}
+                onClick={() => navigate(qa.path)}
+                role="button"
+                tabIndex={0}
                 onKeyDown={e => e.key === "Enter" && navigate(qa.path)}>
                 <span className={styles.quickIcon}>{qa.icon}</span>
                 <span className={styles.quickLabel}>{qa.label}</span>
@@ -533,6 +847,108 @@ export default function DashboardPage() {
         </div>
 
       </main>
+    </div>
+  );
+}
+
+// ── Reusable expense table ────────────────────────────────────────────────────
+// Extracted so it's shared by the Expenses tab (pending + all) and History tab
+
+function ExpenseTable({
+  expenses,
+  expActionId,
+  onAction,
+  showAll = false,
+}: {
+  expenses: ExpenseClaimResponse[];
+  expActionId: number | null;
+  onAction: (claimId: number, action: "approve" | "reject" | "reimburse") => void;
+  showAll?: boolean;
+}) {
+  const fmtDate = (d: string | null | undefined) => {
+    if (!d) return "—";
+    try { return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" }); }
+    catch { return d ?? "—"; }
+  };
+
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <thead>
+          <tr style={{ background: "#f8fafc", borderBottom: "2px solid #e2e8f0" }}>
+            {["Code", "Employee", "Category", "Amount", "Expense Date", "Bill", "Status", "Actions"].map(h => (
+              <th key={h} style={{ padding: "10px 12px", textAlign: "left", fontWeight: 700, color: "#64748b", whiteSpace: "nowrap" }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {expenses.map(exp => (
+            <tr key={exp.claimId} style={{ borderBottom: "1px solid #f1f5f9" }}>
+
+              <td style={{ padding: "10px 12px", fontWeight: 600, color: "#0f172a", whiteSpace: "nowrap" }}>
+                {exp.claimCode}
+              </td>
+
+              <td style={{ padding: "10px 12px", color: "#334155" }}>{exp.employeeName}</td>
+
+              <td style={{ padding: "10px 12px", color: "#334155" }}>{exp.category}</td>
+
+              <td style={{ padding: "10px 12px", fontWeight: 700, color: "#0f172a", whiteSpace: "nowrap" }}>
+                ₹{exp.amount.toLocaleString("en-IN")}
+                {exp.currency !== "INR" && (
+                  <span style={{ fontSize: 10, color: "#94a3b8", marginLeft: 4 }}>{exp.currency}</span>
+                )}
+              </td>
+
+              <td style={{ padding: "10px 12px", color: "#64748b", whiteSpace: "nowrap" }}>
+                {fmtDate(exp.expenseDate)}
+              </td>
+
+              {/* ── Bill cell with hover preview + download ── */}
+              <td style={{ padding: "10px 12px" }}>
+                <BillCell billPath={exp.billPath} billFileName={exp.billFileName} />
+              </td>
+
+              <td style={{ padding: "10px 12px" }}>
+                <span style={expenseBadgeStyle(exp.status)}>{exp.status}</span>
+              </td>
+
+              <td style={{ padding: "10px 12px" }}>
+                <div style={{ display: "flex", gap: 6, flexWrap: "nowrap" }}>
+                  {exp.status === "Submitted" && (
+                    <>
+                      <button
+                        disabled={expActionId === exp.claimId}
+                        onClick={() => onAction(exp.claimId, "approve")}
+                        style={{ padding: "4px 10px", background: expActionId === exp.claimId ? "#86efac" : "#22c55e", color: "#fff", border: "none", borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: expActionId === exp.claimId ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}>
+                        {expActionId === exp.claimId ? "…" : "Approve"}
+                      </button>
+                      <button
+                        disabled={expActionId === exp.claimId}
+                        onClick={() => onAction(exp.claimId, "reject")}
+                        style={{ padding: "4px 10px", background: expActionId === exp.claimId ? "#fca5a5" : "#ef4444", color: "#fff", border: "none", borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: expActionId === exp.claimId ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}>
+                        {expActionId === exp.claimId ? "…" : "Reject"}
+                      </button>
+                    </>
+                  )}
+                  {exp.status === "Approved" && (
+                    <button
+                      disabled={expActionId === exp.claimId}
+                      onClick={() => onAction(exp.claimId, "reimburse")}
+                      style={{ padding: "4px 10px", background: expActionId === exp.claimId ? "#c4b5fd" : "#8b5cf6", color: "#fff", border: "none", borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: expActionId === exp.claimId ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}>
+                      {expActionId === exp.claimId ? "…" : "Reimburse"}
+                    </button>
+                  )}
+                  {(exp.status === "Rejected" || exp.status === "Reimbursed") && (
+                    <span style={{ fontSize: 11, color: "#94a3b8" }}>—</span>
+                  )}
+                </div>
+              </td>
+
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

@@ -7,6 +7,7 @@ using BgaussTravel.API.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
+using System.IdentityModel.Tokens.Jwt;
 
 namespace BgaussTravel.API.Controllers;
 
@@ -28,26 +29,16 @@ public class BookingController : ControllerBase
     {
         get
         {
-            // Try exact name first
-            var val = User.FindFirstValue("EmployeeId")
-                // Fallback: ASP.NET sometimes remaps to this URI
-                ?? User.FindFirstValue("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier")
-                // Fallback: sub claim
-                ?? User.FindFirstValue("sub")
-                ?? User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
-
-            // Log what we found (remove after debugging)
-            if (string.IsNullOrEmpty(val))
+            try
             {
-                // Debug: show all claims when EmployeeId is missing
-                var allClaims = User.Claims.Select(c => $"{c.Type}={c.Value}").ToList();
-                Console.WriteLine($"[BookingController] ⚠️ EmployeeId claim NOT found!");
-                Console.WriteLine($"[BookingController] All claims: {(allClaims.Any() ? string.Join("; ", allClaims) : "NO CLAIMS")}");
+                var authHeader = Request.Headers["Authorization"].FirstOrDefault();
+                if (string.IsNullOrWhiteSpace(authHeader) || !authHeader.StartsWith("Bearer "))
+                    return 0;
+                var jwt = new JwtSecurityTokenHandler().ReadJwtToken(authHeader["Bearer ".Length..].Trim());
+                var val = jwt.Claims.FirstOrDefault(c => c.Type == "EmployeeId")?.Value;
+                return int.TryParse(val, out var id) ? id : 0;
             }
-
-            var id = int.TryParse(val, out var parsed) ? parsed : 0;
-            if (id > 0) Console.WriteLine($"[BookingController] ✅ EmployeeId extracted: {id}");
-            return id;
+            catch { return 0; }
         }
     }
 
