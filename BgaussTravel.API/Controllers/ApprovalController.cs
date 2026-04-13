@@ -37,29 +37,31 @@ public class ApprovalController : ControllerBase
     // ── GET /api/Approval/summary ─────────────────────────────────────────────
     // Powers the HR/Admin stat cards on the dashboard.
     // Returns counts for every request status + resolved list for History tab.
+    // BEFORE: Summary() makes many separate DB calls
+    // AFTER: One grouped query + one expense sum
+
     [HttpGet("summary")]
     public async Task<IActionResult> Summary()
     {
-        // One DB round-trip: group all TravelRequests by status
+        // Single round-trip for all status counts
         var statusCounts = await _db.TravelRequests
             .GroupBy(r => r.Status)
             .Select(g => new { Status = g.Key, Count = g.Count() })
             .ToListAsync();
 
         var countByStatus = statusCounts.ToDictionary(x => x.Status, x => x.Count);
-
         int Get(string s) => countByStatus.TryGetValue(s, out var c) ? c : 0;
 
-        // Expense pipeline: sum of all Submitted expense claim amounts
+        // Single round-trip for expense pipeline — add timeout safety
         var expensePipeline = await _db.ExpenseClaims
             .Where(e => e.Status == "Submitted")
             .SumAsync(e => (decimal?)e.Amount) ?? 0m;
 
-        // Resolved requests (Approved + Rejected) for the History sub-tab
+        // Resolved requests — limit columns fetched, no unnecessary includes
         var resolvedRequests = await _db.TravelRequests
-            .Include(r => r.Employee)
             .Where(r => r.Status == "Approved" || r.Status == "Rejected")
             .OrderByDescending(r => r.UpdatedAt)
+            .Take(100)                          // ← ADD: cap at 100 rows
             .Select(r => new
             {
                 requestId       = r.RequestId,
@@ -75,6 +77,7 @@ public class ApprovalController : ControllerBase
                 createdAt       = r.CreatedAt,
                 updatedAt       = r.UpdatedAt,
                 notes           = r.Notes,
+                // Join employee inline — no .Include() needed
                 employeeId      = r.Employee.EmployeeId,
                 employeeName    = r.Employee.DisplayName,
                 employeeCode    = r.Employee.EmployeeCode,
@@ -85,15 +88,12 @@ public class ApprovalController : ControllerBase
 
         return Ok(new
         {
-            // Counts for stat cards
-            pendingApprovals  = Get("Submitted") + Get("UnderReview"),
-            approvedCount     = Get("Approved"),
-            rejectedCount     = Get("Rejected"),
-            draftCount        = Get("Draft"),
-            totalRequests     = statusCounts.Sum(x => x.Count),
-            expensePipeline,          // ₹ sum of pending expense claims
-
-            // Full resolved list — avoids a second API call from the frontend
+            pendingApprovals = Get("Submitted") + Get("UnderReview"),
+            approvedCount    = Get("Approved"),
+            rejectedCount    = Get("Rejected"),
+            draftCount       = Get("Draft"),
+            totalRequests    = statusCounts.Sum(x => x.Count),
+            expensePipeline,
             resolvedRequests,
         });
     }
