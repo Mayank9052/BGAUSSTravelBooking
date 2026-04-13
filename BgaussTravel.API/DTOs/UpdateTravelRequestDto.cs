@@ -9,4 +9,11 @@ public class UpdateTravelRequestDto
     public string?  TransportType   { get; set; }
     public decimal? EstimatedAmount { get; set; }
     public string?  Notes           { get; set; }
+    public double? OriginLatitude { get; set; }
+
+    public double? OriginLongitude { get; set; }
+
+    public string? OriginAddress { get; set; }
+
+    public DateTime? LocationCapturedAt { get; set; }
 }

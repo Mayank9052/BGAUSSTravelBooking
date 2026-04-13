@@ -33,6 +33,14 @@ public partial class TravelRequest
 
     public string? Notes { get; set; }
 
+    public double? OriginLatitude { get; set; }
+
+    public double? OriginLongitude { get; set; }
+
+    public string? OriginAddress { get; set; }
+
+    public DateTime? LocationCapturedAt { get; set; }
+
     public virtual TravelEmployee Employee { get; set; } = null!;
 
     public virtual ICollection<ExpenseClaim> ExpenseClaims { get; set; } = new List<ExpenseClaim>();
