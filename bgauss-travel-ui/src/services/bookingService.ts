@@ -20,6 +20,11 @@ export interface CreateBookingInput {
   transportType:    string;   // Flight | Train | Cab | Hotel | Multiple
   estimatedAmount?: number;
   notes?:           string;
+  // Location fields (optional)
+  originLatitude?:     number;
+  originLongitude?:    number;
+  originAddress?:      string;
+  locationCapturedAt?: string;   // ISO timestamp
 }
 
 export interface UpdateBookingInput {

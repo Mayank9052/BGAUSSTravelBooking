@@ -3,25 +3,16 @@
 const BASE = "/api";
 
 function getToken(): string {
-  const token = localStorage.getItem("jwt_token") ?? "";
-  return token;
+  return localStorage.getItem("jwt_token") ?? "";
 }
 
 function authHeaders(): HeadersInit {
   const token = getToken();
   const headers: HeadersInit = { "Content-Type": "application/json" };
-  
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-    console.log("[API] ✅ JWT token found — sending in Authorization header");
-  } else {
-    console.warn("[API] ⚠️  No JWT token found in localStorage — requests will fail with 401");
-  }
-  
+  if (token) headers["Authorization"] = `Bearer ${token}`;
   return headers;
 }
 
-// ✅ Custom error class that carries HTTP status
 export class ApiError extends Error {
   status: number;
   constructor(message: string, status: number) {
@@ -33,15 +24,10 @@ export class ApiError extends Error {
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (res.status === 204) return undefined as T;
-
   if (!res.ok) {
     const body = await res.json().catch(() => ({ message: `HTTP ${res.status}` })) as { message?: string };
-    const message = body.message ?? `HTTP ${res.status}`;
-
-    // Throw ApiError with status — let the caller decide what to do
-    throw new ApiError(message, res.status);
+    throw new ApiError(body.message ?? `HTTP ${res.status}`, res.status);
   }
-
   return res.json() as Promise<T>;
 }
 
@@ -51,18 +37,12 @@ export async function get<T>(path: string): Promise<T> {
 }
 
 export async function post<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    method: "POST", headers: authHeaders(), body: JSON.stringify(body),
-  });
+  const res = await fetch(`${BASE}${path}`, { method: "POST", headers: authHeaders(), body: JSON.stringify(body) });
   return handleResponse<T>(res);
 }
 
 export async function put<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    method: "PUT",
-    headers: authHeaders(),
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  const res = await fetch(`${BASE}${path}`, { method: "PUT", headers: authHeaders(), body: body !== undefined ? JSON.stringify(body) : undefined });
   return handleResponse<T>(res);
 }
 
@@ -74,34 +54,35 @@ export async function del<T>(path: string): Promise<T> {
 export async function uploadFile<T>(path: string, file: File, fieldName = "file"): Promise<T> {
   const form = new FormData();
   form.append(fieldName, file);
-  const res = await fetch(`${BASE}${path}`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${getToken()}` },
-    body: form,
-  });
+  const res = await fetch(`${BASE}${path}`, { method: "POST", headers: { Authorization: `Bearer ${getToken()}` }, body: form });
   return handleResponse<T>(res);
 }
 
-// ── Shared response types (match controller DTOs) ─────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface TravelRequestResponse {
-  requestId:       number;
-  requestCode:     string;
-  employeeId:      number;
-  employeeName:    string;
-  employeeCode:    string;
-  department:      string;
-  travelPurpose:   string;
-  destination:     string;
-  departureDate:   string;   // DateOnly → "yyyy-MM-dd"
-  returnDate:      string;
-  transportType:   string;
-  estimatedAmount: number | null;
-  status:          string;
-  submittedAt:     string | null;
-  createdAt:       string;
-  notes:           string | null;
-  expenseClaims:   ExpenseClaimResponse[];
+  requestId:        number;
+  requestCode:      string;
+  employeeId:       number;
+  employeeName:     string;
+  employeeCode:     string;
+  department:       string;
+  travelPurpose:    string;
+  destination:      string;
+  departureDate:    string;
+  returnDate:       string;
+  transportType:    string;
+  estimatedAmount:  number | null;
+  status:           string;
+  submittedAt:      string | null;
+  createdAt:        string;
+  notes:            string | null;
+  // ── Location fields (nullable) ─────────────────────────────────────────────
+  originLatitude:     number | null;
+  originLongitude:    number | null;
+  originAddress:      string | null;
+  locationCapturedAt: string | null;
+  expenseClaims:    ExpenseClaimResponse[];
 }
 
 export interface ExpenseClaimResponse {

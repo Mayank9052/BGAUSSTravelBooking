@@ -154,6 +154,7 @@ public partial class AppDbContext : DbContext
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getutcdate())");
             entity.Property(e => e.Destination).HasMaxLength(256);
             entity.Property(e => e.EstimatedAmount).HasColumnType("decimal(12, 2)");
+            entity.Property(e => e.OriginAddress).HasMaxLength(500);
             entity.Property(e => e.RequestCode).HasMaxLength(32);
             entity.Property(e => e.Status)
                 .HasMaxLength(32)
