@@ -1,10 +1,9 @@
 // src/pages/dashboard/DashboardPage.tsx
-// Changes:
-//  - Notification bell REMOVED from inline JSX → passed as prop to CommonNavbar
-//  - Employee "Approved" stat card fixed: uses trips array directly
-//  - Mini sparkline bar on "Approved" stat card links to /reports
-//  - Admin/HR: Travel Policy configuration tab added
-//  - SignalR ref kept; liveToast kept
+// Changes from original:
+//  1. Employee "My Trips" now loads & shows linked expense claims per trip (with bill previews)
+//  2. Each trip card has an "Upload Bill" button → navigates to /expense/submit?requestId=X
+//  3. Approved/historical trips also show an "Add Expense" button for late bill uploads
+//  4. ExpenseSubmitPage receives requestId query param to pre-select and lock the trip
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
@@ -25,6 +24,7 @@ import type {
   ApprovalResponse,
 } from "../../services/apiClient";
 import type { HubConnection } from "@microsoft/signalr";
+import { HubConnectionState } from "@microsoft/signalr";
 import styles from "./DashboardPage.module.css";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -45,12 +45,12 @@ const STATUS_COLORS: Record<string, string> = {
 const expenseBadgeStyle = (status: string): React.CSSProperties => ({
   padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700,
   background:
-    status === "Approved"   ? "#dcfce7"
+    status === "Approved"    ? "#dcfce7"
     : status === "Rejected"  ? "#fee2e2"
     : status === "Reimbursed"? "#ede9fe"
     : "#fef3c7",
   color:
-    status === "Approved"   ? "#15803d"
+    status === "Approved"    ? "#15803d"
     : status === "Rejected"  ? "#b91c1c"
     : status === "Reimbursed"? "#6d28d9"
     : "#92400e",
@@ -78,7 +78,7 @@ function BillCell({ billPath, billFileName }: { billPath: string | null; billFil
   const label   = billFileName
     ? billFileName.length > 16 ? billFileName.slice(0, 16) + "…" : billFileName
     : "View Bill";
-  const fullUrl = billPath.startsWith("http") ? billPath : `${window.location.origin}${billPath}`;
+  const fullUrl = billPath.startsWith("https") ? billPath : `${window.location.origin}${billPath}`;
   return (
     <div style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 6 }}>
       <a href={fullUrl} target="_blank" rel="noreferrer"
@@ -138,6 +138,112 @@ function ApprovalHistoryDrawer({ requestId, histories, loadingId }: {
           {h.comments && <span style={{ color: "#64748b", fontStyle: "italic" }}>— "{h.comments}"</span>}
         </div>
       ))}
+    </div>
+  );
+}
+
+// ── NEW: Trip Expense Claims Panel ────────────────────────────────────────────
+// Shows expense claims linked to a specific travel request, with bill previews
+// and an "Upload Bill" button for claims missing a bill.
+function TripExpensePanel({
+  requestId,
+  navigate,
+}: {
+  requestId: number;
+  navigate: (path: string) => void;
+}) {
+  const [claims, setClaims]   = useState<ExpenseClaimResponse[] | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    expenseService.getMy()
+      .then(all => {
+        // Filter to claims linked to this specific travel request
+        setClaims(all.filter(c => c.requestId === requestId));
+      })
+      .catch(() => setClaims([]))
+      .finally(() => setLoading(false));
+  }, [requestId]);
+
+  if (loading) {
+    return (
+      <div style={{ padding: "10px 0", fontSize: 12, color: "#94a3b8" }}>
+        Loading expenses…
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 4 }}>
+      {/* Header row */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+          🧾 Expense Claims ({claims?.length ?? 0})
+        </span>
+        {/* Add Expense button — always available so employee can add expenses to any approved trip */}
+        <button
+          onClick={() => navigate(`/expense/submit?requestId=${requestId}`)}
+          style={{
+            padding: "4px 12px", background: "#0f172a", color: "#fff", border: "none",
+            borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer",
+            display: "flex", alignItems: "center", gap: 4,
+          }}>
+          + Add Expense
+        </button>
+      </div>
+
+      {/* No claims yet */}
+      {(!claims || claims.length === 0) && (
+        <div style={{
+          padding: "10px 14px", background: "#f8fafc", borderRadius: 8,
+          fontSize: 12, color: "#94a3b8", border: "1px dashed #e2e8f0",
+        }}>
+          No expense claims yet. Click "Add Expense" to submit one.
+        </div>
+      )}
+
+      {/* Claims list */}
+      {claims && claims.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {claims.map(claim => (
+            <div key={claim.claimId} style={{
+              display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10,
+              padding: "8px 12px", background: "#f8fafc", borderRadius: 8,
+              border: "1px solid #e2e8f0", fontSize: 12,
+            }}>
+              {/* Category + code */}
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontWeight: 700, color: "#0f172a", fontSize: 12 }}>{claim.category}</div>
+                <div style={{ color: "#94a3b8", fontSize: 11 }}>{claim.claimCode} · {fmtDate(claim.expenseDate)}</div>
+              </div>
+
+              {/* Amount */}
+              <div style={{ fontWeight: 700, color: "#0f172a", whiteSpace: "nowrap" }}>
+                ₹{claim.amount.toLocaleString("en-IN")}
+              </div>
+
+              {/* Status badge */}
+              <span style={expenseBadgeStyle(claim.status)}>{claim.status}</span>
+
+              {/* Bill: show link if exists, else upload button */}
+              {claim.billPath ? (
+                <BillCell billPath={claim.billPath} billFileName={claim.billFileName} />
+              ) : (
+                <button
+                  onClick={() => navigate(`/expense/submit?requestId=${requestId}&claimId=${claim.claimId}&uploadBill=1`)}
+                  style={{
+                    padding: "3px 10px", background: "#fef3c7", color: "#92400e",
+                    border: "1px solid #fde68a", borderRadius: 6, fontSize: 11,
+                    fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
+                  }}>
+                  ⚠ Upload Bill
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -277,7 +383,6 @@ function TravelPolicyConfig() {
   };
 
   const handleSave = () => {
-    // In a real app: await put("/Policy/travel", policy)
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
   };
@@ -313,8 +418,6 @@ function TravelPolicyConfig() {
           {saved ? "✓ Saved!" : "Save Policy"}
         </button>
       </div>
-
-      {/* Limits grid */}
       <div style={{ padding: "20px 24px" }}>
         <p style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 14 }}>
           💰 Expense Limits per Trip
@@ -326,10 +429,7 @@ function TravelPolicyConfig() {
           {field("Max Train Amount", "maxTrainAmount")}
         </div>
       </div>
-
       <div style={{ margin: "0 24px", borderTop: "1.5px solid #f1f5f9" }} />
-
-      {/* Rules grid */}
       <div style={{ padding: "20px 24px" }}>
         <p style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 14 }}>
           📋 Approval & Booking Rules
@@ -340,10 +440,7 @@ function TravelPolicyConfig() {
           {field("Advance Booking (days)", "advanceBookingDays", "")}
         </div>
       </div>
-
       <div style={{ margin: "0 24px", borderTop: "1.5px solid #f1f5f9" }} />
-
-      {/* Allowed transport categories */}
       <div style={{ padding: "20px 24px 28px" }}>
         <p style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 14 }}>
           🚗 Allowed Travel Categories
@@ -353,13 +450,7 @@ function TravelPolicyConfig() {
             const active = policy.allowedCategories.includes(cat);
             return (
               <button key={cat} onClick={() => toggleCategory(cat)}
-                style={{
-                  padding: "7px 16px", borderRadius: 20, fontSize: 12, fontWeight: 700,
-                  cursor: "pointer", border: "none",
-                  background: active ? "#0f172a" : "#f1f5f9",
-                  color: active ? "#fff" : "#64748b",
-                  transition: "all 0.15s",
-                }}>
+                style={{ padding: "7px 16px", borderRadius: 20, fontSize: 12, fontWeight: 700, cursor: "pointer", border: "none", background: active ? "#0f172a" : "#f1f5f9", color: active ? "#fff" : "#64748b", transition: "all 0.15s" }}>
                 {active ? "✓ " : ""}{cat}
               </button>
             );
@@ -373,7 +464,7 @@ function TravelPolicyConfig() {
   );
 }
 
-// ── Analytics preview card (links to ReportsPage) ─────────────────────────────
+// ── Analytics preview card ────────────────────────────────────────────────────
 function AnalyticsPreviewCard({
   approvedCount, pendingCount, rejectedCount, navigate,
 }: {
@@ -436,9 +527,10 @@ export default function DashboardPage() {
   // ── State ─────────────────────────────────────────────────────────────────
   const [trips,           setTrips]           = useState<TravelRequestResponse[]>([]);
   const [summary,         setSummary]         = useState<ExpenseSummaryResponse | null>(null);
-  const [notifications,   setNotifications]   = useState<NotificationResponse[]>([]);
-  const [unreadCount,     setUnreadCount]     = useState(0);
-  const [showNotifDrop,   setShowNotifDrop]   = useState(false);
+  const [freshNotifs,    setFreshNotifs]    = useState<NotificationResponse[]>([]);
+  const [allNotifs,      setAllNotifs]      = useState<NotificationResponse[]>([]);
+  const [unreadCount,    setUnreadCount]    = useState(0);
+  const [showNotifDrop,  setShowNotifDrop]  = useState(false);
   const [pendingReqs,     setPendingReqs]     = useState<TravelRequestResponse[]>([]);
   const [resolvedReqs,    setResolvedReqs]    = useState<TravelRequestResponse[]>([]);
   const [allExpenses,     setAllExpenses]     = useState<ExpenseClaimResponse[]>([]);
@@ -454,11 +546,18 @@ export default function DashboardPage() {
   const [historyLoadingId,setHistoryLoadingId]= useState<number | null>(null);
   const [liveToast,       setLiveToast]       = useState<{ title: string; msg: string; type: "info" | "success" | "warn" } | null>(null);
 
-  const hasFetched = useRef(false);
-  const signalRRef = useRef<HubConnection | null>(null);
+  // ── NEW: track which trip cards are expanded to show expenses ────────────
+  const [expandedExpenseTripId, setExpandedExpenseTripId] = useState<number | null>(null);
+
+  const hasFetched  = useRef(false);
+  const signalRRef  = useRef<HubConnection | null>(null);
+  const mountedRef  = useRef(true);
 
   // ── Data loading ──────────────────────────────────────────────────────────
   const loadDashboard = useCallback(async (showLoader = true) => {
+    const token = localStorage.getItem("jwt_token");
+    if (!token) return;
+
     if (showLoader) setLoading(true);
     try {
       const [trRes, sumRes, notifRes] = await Promise.allSettled([
@@ -466,10 +565,13 @@ export default function DashboardPage() {
         expenseService.summary(),
         notificationService.getAll(false),
       ]);
+      if (!mountedRef.current) return;
       if (trRes.status    === "fulfilled") setTrips(trRes.value);
       if (sumRes.status   === "fulfilled") setSummary(sumRes.value);
       if (notifRes.status === "fulfilled") {
-        setNotifications(notifRes.value.items);
+        const items = notifRes.value.items ?? [];
+        setFreshNotifs(items.filter(n => !n.isRead));
+        setAllNotifs(items);
         setUnreadCount(notifRes.value.unreadCount);
       }
 
@@ -479,54 +581,76 @@ export default function DashboardPage() {
           approvalService.summary(),
           get<{ total: number; items: ExpenseClaimResponse[] }>("/Expense?pageSize=50"),
         ]);
+        if (!mountedRef.current) return;
         if (pendingRes.status === "fulfilled")
           setPendingReqs(pendingRes.value.pendingRequests ?? []);
         if (approvalSumRes.status === "fulfilled") {
           setApprovalSummary(approvalSumRes.value);
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           setResolvedReqs((approvalSumRes.value as any).resolvedRequests ?? []);
         }
         if (expRes.status === "fulfilled")
           setAllExpenses(expRes.value.items ?? []);
       }
     } catch { /* silent */ }
-    finally { if (showLoader) setLoading(false); }
+    finally { if (showLoader && mountedRef.current) setLoading(false); }
   }, [isAdminOrHr]);
 
+  // ── Init ──────────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!localStorage.getItem("jwt_token")) { navigate("/login", { replace: true }); return; }
-    if (hasFetched.current) return;
-    hasFetched.current = true;
-    void loadDashboard();
-  }, [loadDashboard, navigate]);
+    mountedRef.current = true;
 
-  // ── SignalR ───────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!localStorage.getItem("jwt_token")) return;
-    const conn = buildNotificationConnection();
-    signalRRef.current = conn;
-    conn.on("ReceiveNotification", (notif: NotificationResponse) => {
-      setNotifications(prev => [notif, ...prev]);
-      setUnreadCount(c => c + 1);
-      const toastType = notif.title?.includes("Approved") ? "success"
-        : notif.title?.includes("Rejected") ? "warn" : "info";
-      setLiveToast({ title: notif.title ?? "Update", msg: notif.message, type: toastType });
-      setTimeout(() => setLiveToast(null), 5000);
-      if (["TravelRequest", "ExpenseClaim", "Reimbursement"].includes(notif.type ?? "")) {
-        void loadDashboard(false);
-        if (notif.requestId)
-          setTripHistories(prev => { const n = { ...prev }; delete n[notif.requestId!]; return n; });
-      }
-    });
-    conn.start().catch(() => { /* SignalR unavailable */ });
-    return () => { void conn.stop(); signalRRef.current = null; };
-  }, [loadDashboard]);
+    const tryInit = () => {
+      const token = localStorage.getItem("jwt_token");
+      if (!token) { navigate("/login", { replace: true }); return; }
+      if (hasFetched.current) return;
+      hasFetched.current = true;
+
+      void loadDashboard();
+
+      const conn = buildNotificationConnection();
+      signalRRef.current = conn;
+
+      conn.on("ReceiveNotification", (notif: NotificationResponse) => {
+        if (!mountedRef.current) return;
+        setFreshNotifs(prev => [notif, ...prev]);
+        setAllNotifs(prev => [notif, ...prev]);
+        setUnreadCount(c => c + 1);
+        const toastType = notif.title?.includes("Approved") ? "success"
+          : notif.title?.includes("Rejected") ? "warn" : "info";
+        setLiveToast({ title: notif.title ?? "Update", msg: notif.message, type: toastType });
+        setTimeout(() => setLiveToast(null), 5000);
+        if (["TravelRequest", "ExpenseClaim", "Reimbursement"].includes(notif.type ?? "")) {
+          void loadDashboard(false);
+          if (notif.requestId)
+            setTripHistories(prev => { const n = { ...prev }; delete n[notif.requestId!]; return n; });
+        }
+      });
+
+      conn.start().catch(err => {
+        console.warn("[SignalR] Could not connect:", err instanceof Error ? err.message : err);
+      });
+    };
+
+    tryInit();
+
+    const onAuthReady = () => { if (!hasFetched.current) tryInit(); };
+    window.addEventListener("app:auth-ready", onAuthReady);
+
+    return () => {
+      mountedRef.current = false;
+      window.removeEventListener("app:auth-ready", onAuthReady);
+      const conn = signalRRef.current;
+      if (conn && conn.state !== HubConnectionState.Disconnected) void conn.stop();
+      signalRRef.current = null;
+    };
+  }, [loadDashboard, navigate]);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
   const handleMarkRead = async (id: number) => {
     try {
       await notificationService.markRead(id);
-      setNotifications(prev => prev.map(n => n.notificationId === id ? { ...n, isRead: true } : n));
+      setFreshNotifs(prev => prev.filter(n => n.notificationId !== id));
+      setAllNotifs(prev => prev.map(n => n.notificationId === id ? { ...n, isRead: true } : n));
       setUnreadCount(c => Math.max(0, c - 1));
     } catch { /* silent */ }
   };
@@ -534,7 +658,8 @@ export default function DashboardPage() {
   const handleMarkAllRead = async () => {
     try {
       await notificationService.markAllRead();
-      setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+      setFreshNotifs([]);
+      setAllNotifs(prev => prev.map(n => ({ ...n, isRead: true })));
       setUnreadCount(0);
     } catch { /* silent */ }
   };
@@ -577,22 +702,33 @@ export default function DashboardPage() {
     } finally { setHistoryLoadingId(null); }
   };
 
+  // ── NEW: toggle expense panel for a trip ──────────────────────────────────
+  const handleToggleExpenses = (requestId: number) => {
+    setExpandedExpenseTripId(prev => prev === requestId ? null : requestId);
+  };
+
   // ── Notification bell prop ────────────────────────────────────────────────
-  // Only DashboardPage mounts the bell — passed via prop to CommonNavbar.
   const notificationBellProp: NotificationBellProps = {
-    notifications: notifications.map(n => ({
+    notifications: freshNotifs.map(n => ({
       notificationId: n.notificationId,
-      title: n.title,
-      message: n.message,
-      isRead: n.isRead,
+      title:    n.title,
+      message:  n.message,
+      isRead:   n.isRead,
+      createdAt: n.createdAt,
+    })),
+    allNotifications: allNotifs.map(n => ({
+      notificationId: n.notificationId,
+      title:    n.title,
+      message:  n.message,
+      isRead:   n.isRead,
       createdAt: n.createdAt,
     })),
     unreadCount,
-    showDrop:       showNotifDrop,
-    onToggle:       () => setShowNotifDrop(v => !v),
-    onMarkRead:     (id) => void handleMarkRead(id),
-    onMarkAllRead:  () => void handleMarkAllRead(),
-    onClose:        () => setShowNotifDrop(false),
+    showDrop:      showNotifDrop,
+    onToggle:      () => setShowNotifDrop(v => !v),
+    onMarkRead:    (id) => void handleMarkRead(id),
+    onMarkAllRead: () => void handleMarkAllRead(),
+    onClose:       () => setShowNotifDrop(false),
   };
 
   // ── Nav items ─────────────────────────────────────────────────────────────
@@ -601,18 +737,21 @@ export default function DashboardPage() {
     { id: "expenses", label: "Expenses",                              active: activeTab === "expenses", onClick: () => setActiveTab("expenses") },
     ...(isAdminOrHr ? [
       { id: "approvals", label: `Approvals${pendingReqs.length > 0 ? ` (${pendingReqs.length})` : ""}`, active: activeTab === "approvals", onClick: () => setActiveTab("approvals") },
-      { id: "policy",    label: "Travel Policy",                        active: activeTab === "policy",    onClick: () => setActiveTab("policy") },
+      { id: "policy",    label: "Travel Policy", active: activeTab === "policy", onClick: () => setActiveTab("policy") },
     ] : []),
   ];
 
-  // ── Trip card ─────────────────────────────────────────────────────────────
+  // ── UPDATED: Trip card with expenses panel for employees ──────────────────
   const TripCardWithHistory = ({ r, showEmployee = false, showApproveButtons = false }: {
     r: TravelRequestResponse; showEmployee?: boolean; showApproveButtons?: boolean;
   }) => {
-    const isExpanded = expandedTripId === r.requestId;
-    const isDone     = r.status === "Approved" || r.status === "Rejected";
+    const isExpanded        = expandedTripId === r.requestId;
+    const isExpensesExpanded = !isAdminOrHr && expandedExpenseTripId === r.requestId;
+    const isDone            = r.status === "Approved" || r.status === "Rejected";
+
     return (
       <div className={styles.tripCard} style={{ flexDirection: "column", gap: 0 }}>
+        {/* ── Top row: icon + info + status + actions ── */}
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
           <div className={styles.tripIcon}>{TRANSPORT_ICONS[r.transportType] ?? "🚗"}</div>
           <div className={styles.tripInfo} style={{ flex: 1 }}>
@@ -654,7 +793,34 @@ export default function DashboardPage() {
                 </button>
               </div>
             )}
-            {isDone && (
+
+            {/* ── EMPLOYEE: show expenses toggle + approval history ── */}
+            {!isAdminOrHr && (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, marginTop: 4 }}>
+                {/* Expenses toggle — available for all trips */}
+                <button
+                  onClick={() => handleToggleExpenses(r.requestId)}
+                  style={{
+                    fontSize: 10, fontWeight: 700, cursor: "pointer", border: "none",
+                    background: isExpensesExpanded ? "#0f172a" : "#f1f5f9",
+                    color: isExpensesExpanded ? "#fff" : "#3b82f6",
+                    borderRadius: 6, padding: "3px 10px",
+                  }}>
+                  {isExpensesExpanded ? "▲ hide expenses" : "🧾 expenses & bills"}
+                </button>
+
+                {/* Approval history — only for done trips */}
+                {isDone && (
+                  <button onClick={() => void handleToggleHistory(r.requestId)}
+                    style={{ fontSize: 10, color: "#64748b", background: "none", border: "none", cursor: "pointer", fontWeight: 600, padding: 0 }}>
+                    {isExpanded ? "▲ hide history" : "▼ approval history"}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Admin/HR: approval history toggle */}
+            {isAdminOrHr && isDone && (
               <button onClick={() => void handleToggleHistory(r.requestId)}
                 style={{ fontSize: 10, color: "#3b82f6", background: "none", border: "none", cursor: "pointer", fontWeight: 600, padding: 0, marginTop: 2 }}>
                 {isExpanded ? "▲ hide" : "▼ who actioned"}
@@ -662,8 +828,17 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
+
+        {/* ── EMPLOYEE: Expenses & Bills panel ── */}
+        {!isAdminOrHr && isExpensesExpanded && (
+          <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #f1f5f9" }}>
+            <TripExpensePanel requestId={r.requestId} navigate={navigate} />
+          </div>
+        )}
+
+        {/* ── Approval history drawer ── */}
         {isDone && isExpanded && (
-          <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #f1f5f9", paddingLeft: 54 }}>
+          <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #f1f5f9", paddingLeft: isAdminOrHr ? 54 : 0 }}>
             <ApprovalHistoryDrawer requestId={r.requestId} histories={tripHistories} loadingId={historyLoadingId} />
           </div>
         )}
@@ -672,20 +847,19 @@ export default function DashboardPage() {
   };
 
   // ── Stat cards ────────────────────────────────────────────────────────────
-  const approvedCount = approvalSummary?.approvedCount  ?? 0;
+  const approvedCount = approvalSummary?.approvedCount    ?? 0;
   const pendingCount  = approvalSummary?.pendingApprovals ?? 0;
-  const rejectedCount = approvalSummary?.rejectedCount  ?? 0;
+  const rejectedCount = approvalSummary?.rejectedCount    ?? 0;
   const totalTrips    = approvedCount + pendingCount + rejectedCount;
 
-  // FIX: Employee approved count — derive directly from trips array (not approvalSummary)
-  const myApprovedCount  = trips.filter(t => t.status === "Approved").length;
-  const myPendingCount   = trips.filter(t => t.status === "Submitted" || t.status === "UnderReview").length;
+  const myApprovedCount = trips.filter(t => t.status === "Approved").length;
+  const myPendingCount  = trips.filter(t => t.status === "Submitted" || t.status === "UnderReview").length;
 
   const employeeStatCards = [
-    { label: "Total Trips",    value: loading ? "—" : String(trips.length),       color: styles.statBlue,   icon: "✈️", chart: trips.length > 0 ? [1, 2, trips.length] : [] },
-    { label: "Approved",       value: loading ? "—" : String(myApprovedCount),    color: styles.statGreen,  icon: "✅", chart: myApprovedCount > 0 ? [myApprovedCount] : [] },
-    { label: "Pending Trips",  value: loading ? "—" : String(myPendingCount),     color: styles.statAmber,  icon: "⏳", chart: [] },
-    { label: "Reimbursed",     value: loading ? "—" : `₹${((summary?.totalReimbursed ?? 0) / 1000).toFixed(1)}K`, color: styles.statPurple, icon: "💰", chart: [] },
+    { label: "Total Trips",   value: loading ? "—" : String(trips.length),    color: styles.statBlue,   icon: "✈️", chart: trips.length > 0 ? [1, 2, trips.length] : [] },
+    { label: "Approved",      value: loading ? "—" : String(myApprovedCount), color: styles.statGreen,  icon: "✅", chart: myApprovedCount > 0 ? [myApprovedCount] : [] },
+    { label: "Pending Trips", value: loading ? "—" : String(myPendingCount),  color: styles.statAmber,  icon: "⏳", chart: [] },
+    { label: "Reimbursed",    value: loading ? "—" : `₹${((summary?.totalReimbursed ?? 0) / 1000).toFixed(1)}K`, color: styles.statPurple, icon: "💰", chart: [] },
   ];
 
   const adminStatCards = [
@@ -695,14 +869,13 @@ export default function DashboardPage() {
     { label: "Expense Pipeline",  value: loading || !approvalSummary ? "—" : `₹${((approvalSummary.expensePipeline ?? 0) / 1000).toFixed(1)}K`, color: styles.statPurple, icon: "💰", chart: [] },
   ];
 
-  const statCards = isAdminOrHr ? adminStatCards : employeeStatCards;
+  const statCards       = isAdminOrHr ? adminStatCards : employeeStatCards;
   const pendingExpenses  = allExpenses.filter(e => e.status === "Submitted");
   const resolvedExpenses = allExpenses.filter(e => e.status !== "Submitted");
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className={styles.page}>
-      {/* Notification bell is passed as a prop — not embedded in the page directly */}
       <CommonNavbar
         navItems={navItems}
         user={{ initials, name: fullName, subtitle: role }}
@@ -747,19 +920,11 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Admin: status donut */}
         {isAdminOrHr && !loading && totalTrips > 0 && (
           <StatusDonut approved={approvedCount} pending={pendingCount} rejected={rejectedCount} total={totalTrips} />
         )}
-
-        {/* Admin: analytics preview with bar chart */}
         {isAdminOrHr && !loading && totalTrips > 0 && (
-          <AnalyticsPreviewCard
-            approvedCount={approvedCount}
-            pendingCount={pendingCount}
-            rejectedCount={rejectedCount}
-            navigate={navigate}
-          />
+          <AnalyticsPreviewCard approvedCount={approvedCount} pendingCount={pendingCount} rejectedCount={rejectedCount} navigate={navigate} />
         )}
 
         {/* Stat cards */}
@@ -784,6 +949,14 @@ export default function DashboardPage() {
               <h2 className={styles.sectionTitle}>{isAdminOrHr ? "All Travel Requests" : "My Travel Requests"}</h2>
               <span style={{ fontSize: 12, fontWeight: 700, background: "#f1f5f9", color: "#64748b", borderRadius: 20, padding: "3px 12px" }}>{trips.length}</span>
             </div>
+
+            {/* Employee hint */}
+            {!isAdminOrHr && !loading && trips.length > 0 && (
+              <div style={{ margin: "0 0 12px", padding: "8px 16px", background: "#eff6ff", borderRadius: 8, border: "1px solid #bfdbfe", fontSize: 12, color: "#1e40af" }}>
+                💡 Click <strong>🧾 expenses & bills</strong> on any trip to view linked expense claims, upload missing bills, or add new expenses.
+              </div>
+            )}
+
             {loading ? (
               <div className={styles.loadingRow}>{[1, 2, 3].map(i => <div key={i} className={styles.skeleton} />)}</div>
             ) : trips.length === 0 ? (
@@ -852,7 +1025,7 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* ══ APPROVALS (Admin/HR) ══ */}
+        {/* ══ APPROVALS ══ */}
         {activeTab === "approvals" && isAdminOrHr && (
           <div className={styles.section}>
             <div className={styles.sectionHeader}>
@@ -902,7 +1075,7 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* ══ TRAVEL POLICY (Admin/HR) ══ */}
+        {/* ══ TRAVEL POLICY ══ */}
         {activeTab === "policy" && isAdminOrHr && (
           <div className={styles.section}>
             <TravelPolicyConfig />
@@ -914,14 +1087,14 @@ export default function DashboardPage() {
           <h2 className={styles.sectionTitle}>Quick Actions</h2>
           <div className={styles.quickGrid}>
             {(isAdminOrHr ? [
-              { icon: "📊", label: "View Reports",    sub: "Analytics & insights", path: "/reports"   },
-              { icon: "🛡️", label: "Travel Policy",  sub: "Limits & rules",        path: "#policy",   action: () => setActiveTab("policy") },
-              { icon: "👤", label: "My Profile",      sub: "Account details",      path: "/profile"   },
+              { icon: "📊", label: "View Reports",   sub: "Analytics & insights", path: "/reports" },
+              { icon: "🛡️", label: "Travel Policy",  sub: "Limits & rules",       path: "#policy", action: () => setActiveTab("policy") },
+              { icon: "👤", label: "My Profile",     sub: "Account details",      path: "/profile" },
             ] : [
-              { icon: "✈️", label: "Book Travel",    sub: "New travel request",   path: "/booking/new"    },
+              { icon: "✈️", label: "Book Travel",    sub: "New travel request",   path: "/booking/new" },
               { icon: "🧾", label: "Submit Expense", sub: "Upload a bill",        path: "/expense/submit" },
-              { icon: "📊", label: "View Reports",   sub: "Download reports",     path: "/reports"        },
-              { icon: "👤", label: "My Profile",     sub: "Account details",      path: "/profile"        },
+              { icon: "📊", label: "View Reports",   sub: "Download reports",     path: "/reports" },
+              { icon: "👤", label: "My Profile",     sub: "Account details",      path: "/profile" },
             ]).map(qa => (
               <div key={qa.label} className={styles.quickCard}
                 onClick={() => { if ("action" in qa && qa.action) { qa.action(); } else { navigate(qa.path); } }}

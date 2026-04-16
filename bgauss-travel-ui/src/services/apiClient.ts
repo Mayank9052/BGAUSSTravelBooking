@@ -1,20 +1,31 @@
 // src/services/apiClient.ts
 
-const BASE = "/api";
+const BASE = import.meta.env.VITE_API_BASE_URL || "/api";
 
-function getToken(): string {
-  return localStorage.getItem("jwt_token") ?? "";
+// ─────────────────────────────────────────────────────────────
+// Token
+// ─────────────────────────────────────────────────────────────
+
+function getToken(): string | null {
+  return localStorage.getItem("jwt_token");
 }
 
 function authHeaders(): HeadersInit {
   const token = getToken();
-  const headers: HeadersInit = { "Content-Type": "application/json" };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  return headers;
+
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
 }
+
+// ─────────────────────────────────────────────────────────────
+// Error Class
+// ─────────────────────────────────────────────────────────────
 
 export class ApiError extends Error {
   status: number;
+
   constructor(message: string, status: number) {
     super(message);
     this.name = "ApiError";
@@ -22,137 +33,265 @@ export class ApiError extends Error {
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+// Response Handler (FIXED)
+// ─────────────────────────────────────────────────────────────
+
 async function handleResponse<T>(res: Response): Promise<T> {
-  if (res.status === 204) return undefined as T;
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({ message: `HTTP ${res.status}` })) as { message?: string };
-    throw new ApiError(body.message ?? `HTTP ${res.status}`, res.status);
+  // No content
+  if (res.status === 204) {
+    return undefined as T;
   }
-  return res.json() as Promise<T>;
+
+  const text = await res.text();
+
+  let data: any;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = null;
+  }
+
+  if (!res.ok) {
+    const message =
+      data?.message || `HTTP ${res.status} - ${res.statusText}`;
+
+    throw new ApiError(message, res.status);
+  }
+
+  return data as T;
 }
 
-export async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { method: "GET", headers: authHeaders() });
+// ─────────────────────────────────────────────────────────────
+// API METHODS (FIXED - consistent error handling)
+// ─────────────────────────────────────────────────────────────
+
+// GET
+export async function get<T>(url: string): Promise<T> {
+  const res = await fetch(`${BASE}${url}`, {
+    method: "GET",
+    headers: authHeaders(),
+  });
+
   return handleResponse<T>(res);
 }
 
-export async function post<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { method: "POST", headers: authHeaders(), body: JSON.stringify(body) });
+// POST
+export async function post<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${url}`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  });
+
   return handleResponse<T>(res);
 }
 
-export async function put<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { method: "PUT", headers: authHeaders(), body: body !== undefined ? JSON.stringify(body) : undefined });
+// PUT
+export async function put<T>(url: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${url}`, {
+    method: "PUT",
+    headers: authHeaders(),
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
   return handleResponse<T>(res);
 }
 
-export async function del<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { method: "DELETE", headers: authHeaders() });
+// DELETE
+export async function del<T>(url: string): Promise<T> {
+  const res = await fetch(`${BASE}${url}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+
   return handleResponse<T>(res);
 }
 
-export async function uploadFile<T>(path: string, file: File, fieldName = "file"): Promise<T> {
+// ─────────────────────────────────────────────────────────────
+// FILE UPLOAD (FIXED)
+// ─────────────────────────────────────────────────────────────
+
+export async function uploadFile<T>(
+  url: string,
+  file: File,
+  fieldName = "file"
+): Promise<T> {
+  const token = getToken();
+
   const form = new FormData();
   form.append(fieldName, file);
-  const res = await fetch(`${BASE}${path}`, { method: "POST", headers: { Authorization: `Bearer ${getToken()}` }, body: form });
+
+  const res = await fetch(`${BASE}${url}`, {
+    method: "POST",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: form,
+  });
+
   return handleResponse<T>(res);
 }
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// FILE DOWNLOAD (NEW)
+// ─────────────────────────────────────────────────────────────
+
+export async function downloadFile(
+  url: string,
+  fileName?: string
+): Promise<void> {
+  const token = getToken();
+
+  const res = await fetch(`${BASE}${url}`, {
+    method: "GET",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+
+  if (!res.ok) {
+    throw new ApiError(`Download failed (${res.status})`, res.status);
+  }
+
+  const blob = await res.blob();
+
+  // Create download link
+  const link = document.createElement("a");
+  const objectUrl = window.URL.createObjectURL(blob);
+
+  link.href = objectUrl;
+  link.download = fileName || "file";
+  document.body.appendChild(link);
+  link.click();
+
+  // Cleanup
+  link.remove();
+  window.URL.revokeObjectURL(objectUrl);
+}
+
+// ─────────────────────────────────────────────────────────────
+// FILE VIEW (NEW)
+// ─────────────────────────────────────────────────────────────
+
+export async function viewFile(url: string): Promise<void> {
+  const token = getToken();
+
+  const res = await fetch(`${BASE}${url}`, {
+    method: "GET",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+
+  if (!res.ok) {
+    throw new ApiError(`View failed (${res.status})`, res.status);
+  }
+
+  const blob = await res.blob();
+  const objectUrl = window.URL.createObjectURL(blob);
+
+  window.open(objectUrl, "_blank");
+}
+
+// ─────────────────────────────────────────────────────────────
+// TYPES
+// ─────────────────────────────────────────────────────────────
 
 export interface TravelRequestResponse {
-  requestId:        number;
-  requestCode:      string;
-  employeeId:       number;
-  employeeName:     string;
-  employeeCode:     string;
-  department:       string;
-  travelPurpose:    string;
-  destination:      string;
-  departureDate:    string;
-  returnDate:       string;
-  transportType:    string;
-  estimatedAmount:  number | null;
-  status:           string;
-  submittedAt:      string | null;
-  createdAt:        string;
-  notes:            string | null;
-  // ── Location fields (nullable) ─────────────────────────────────────────────
-  originLatitude:     number | null;
-  originLongitude:    number | null;
-  originAddress:      string | null;
+  requestId: number;
+  requestCode: string;
+  employeeId: number;
+  employeeName: string;
+  employeeCode: string;
+  department: string;
+  travelPurpose: string;
+  destination: string;
+  departureDate: string;
+  returnDate: string;
+  transportType: string;
+  estimatedAmount: number | null;
+  status: string;
+  submittedAt: string | null;
+  createdAt: string;
+  notes: string | null;
+
+  originLatitude: number | null;
+  originLongitude: number | null;
+  originAddress: string | null;
   locationCapturedAt: string | null;
-  expenseClaims:    ExpenseClaimResponse[];
+
+  expenseClaims: ExpenseClaimResponse[];
 }
 
 export interface ExpenseClaimResponse {
-  claimId:         number;
-  claimCode:       string;
-  requestId:       number;
-  requestCode:     string | null;
-  employeeId:      number;
-  employeeName:    string;
-  category:        string;
-  amount:          number;
-  currency:        string;
-  expenseDate:     string;
-  description:     string | null;
-  billPath:        string | null;
-  billFileName:    string | null;
-  status:          string;
+  claimId: number;
+  claimCode: string;
+  requestId: number;
+  requestCode: string | null;
+  employeeId: number;
+  employeeName: string;
+  category: string;
+  amount: number;
+  currency: string;
+  expenseDate: string;
+  description: string | null;
+  billPath: string | null;
+  billFileName: string | null;
+  status: string;
   rejectionReason: string | null;
-  approvedAt:      string | null;
-  reimbursedAt:    string | null;
-  createdAt:       string;
+  approvedAt: string | null;
+  reimbursedAt: string | null;
+  createdAt: string;
 }
 
 export interface ExpenseSummaryResponse {
-  totalPending:    number;
-  totalApproved:   number;
+  totalPending: number;
+  totalApproved: number;
   totalReimbursed: number;
-  pendingCount:    number;
-  approvedCount:   number;
-  rejectedCount:   number;
+  pendingCount: number;
+  approvedCount: number;
+  rejectedCount: number;
   reimbursedCount: number;
 }
 
 export interface NotificationResponse {
   notificationId: number;
-  type:           string;
-  title:          string;
-  message:        string;
-  isRead:         boolean;
-  requestId:      number | null;
-  claimId:        number | null;
-  createdAt:      string;
+  type: string;
+  title: string;
+  message: string;
+  isRead: boolean;
+  requestId: number | null;
+  claimId: number | null;
+  createdAt: string;
 }
 
 export interface DashboardSummaryResponse {
-  totalRequests:    number;
-  pendingRequests:  number;
+  totalRequests: number;
+  pendingRequests: number;
   approvedRequests: number;
   rejectedRequests: number;
-  totalExpenses:    number;
-  pendingExpenses:  number;
+  totalExpenses: number;
+  pendingExpenses: number;
   approvedExpenses: number;
-  totalEmployees:   number;
+  totalEmployees: number;
 }
 
 export interface ApprovalResponse {
-  approvalId:   number;
-  requestId:    number;
-  approverId:   number;
+  approvalId: number;
+  requestId: number;
+  approverId: number;
   approverName: string;
-  level:        number;
-  action:       string;
-  comments:     string | null;
-  actionAt:     string | null;
-  createdAt:    string;
+  level: number;
+  action: string;
+  comments: string | null;
+  actionAt: string | null;
+  createdAt: string;
 }
 
 export interface PagedResult<T> {
-  total:    number;
-  page:     number;
+  total: number;
+  page: number;
   pageSize: number;
-  items:    T[];
+  items: T[];
 }

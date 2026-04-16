@@ -36,6 +36,44 @@ export const expenseService = {
     return get<ExpenseClaimResponse[]>(`/Expense/my${qs}`);
   },
 
+  // ── Bill Helpers ─────────────────────────────────────────────
+
+getBillUrl: (billPath: string | null) => {
+  if (!billPath) return null;
+  return billPath.startsWith("http")
+    ? billPath
+    : `${window.location.origin}${billPath}`;
+},
+
+downloadBill: (billPath: string | null, fileName?: string) => {
+  if (!billPath) return;
+
+  const url = expenseService.getBillUrl(billPath);
+  if (!url) return;
+
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName || "bill";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+},
+
+openBill: (billPath: string | null) => {
+  const url = expenseService.getBillUrl(billPath);
+  if (!url) return;
+
+  window.open(url, "_blank");
+},
+
+isImage: (billPath: string | null) => {
+  return !!billPath && /\.(jpg|jpeg|png|webp)$/i.test(billPath);
+},
+
+isPdf: (billPath: string | null) => {
+  return !!billPath && /\.pdf$/i.test(billPath);
+},
+
   getAll: (status?: string, page = 1, pageSize = 20) => {
     const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
     if (status) qs.set("status", status);

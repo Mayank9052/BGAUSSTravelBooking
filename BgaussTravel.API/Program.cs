@@ -1,105 +1,144 @@
-// BgaussTravel.API/Program.cs
-
 using System.Text;
 using BgaussTravel.API.Data;
 using BgaussTravel.API.Hubs;
 using BgaussTravel.API.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
-using Scalar.AspNetCore;
+using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ── Database ──────────────────────────────────────────────────────────────────
+// ── DATABASE ─────────────────────────────────────────────
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(
         builder.Configuration.GetConnectionString("DefaultConnection"),
-        sqlOptions => sqlOptions.CommandTimeout(60)  // ← 60 seconds instead of default 30
+        sqlOptions => sqlOptions.CommandTimeout(60)
     )
 );
 
-// ── SignalR ───────────────────────────────────────────────────────────────────
+// ── SIGNALR ─────────────────────────────────────────────
 builder.Services.AddSignalR();
 
-// ── App Services ──────────────────────────────────────────────────────────────
+// ── SERVICES ────────────────────────────────────────────
 builder.Services.AddScoped<ICodeSequenceService, CodeSequenceService>();
 builder.Services.AddScoped<ITravelNotificationService, TravelNotificationService>();
 
-// ── CORS ──────────────────────────────────────────────────────────────────────
+// ── CORS ───────────────────────────────────────────────
 builder.Services.AddCors(opt => opt.AddDefaultPolicy(p =>
-    p.WithOrigins(
-        "http://localhost:5173",
-        "http://localhost:3000",
-        builder.Configuration["AppUrl"] ?? "https://travel.bgauss.com"
-    )
-    .AllowAnyMethod()
-    .AllowAnyHeader()
-    .AllowCredentials()));
+{
+    var allowedOrigins = builder.Configuration
+        .GetSection("AllowedOrigins")
+        .Get<string[]>()
+        ?? new[] { "http://localhost:5173" };
 
-// ── JWT Authentication ────────────────────────────────────────────────────────
-// Read config BEFORE using the values
-var jwtKey    = builder.Configuration["Jwt:Key"]    ?? throw new InvalidOperationException("Jwt:Key is missing from appsettings.json");
+    p.WithOrigins(allowedOrigins)
+     .AllowAnyMethod()
+     .AllowAnyHeader()
+     .AllowCredentials();
+}));
+
+// ── JWT AUTH ───────────────────────────────────────────
+var jwtKey = builder.Configuration["Jwt:Key"]
+    ?? throw new InvalidOperationException("Jwt:Key is missing");
+
 var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "BgaussTravel";
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
-        options.MapInboundClaims = false; // prevents ASP.NET remapping "EmployeeId" to a URI
+        options.MapInboundClaims = false;
 
         options.TokenValidationParameters = new TokenValidationParameters
         {
-            ValidateIssuer           = true,
-            ValidateAudience         = true,
-            ValidateLifetime         = true,
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            ValidIssuer              = jwtIssuer,
-            ValidAudience            = jwtIssuer, // AuthController sets audience = issuer
-            IssuerSigningKey         = new SymmetricSecurityKey(
-                                           Encoding.UTF8.GetBytes(jwtKey)),
-            NameClaimType            = "name",
-            RoleClaimType            = "Role",
+            ValidIssuer = jwtIssuer,
+            ValidAudience = jwtIssuer,
+            IssuerSigningKey = new SymmetricSecurityKey(
+                Encoding.UTF8.GetBytes(jwtKey)
+            ),
+            NameClaimType = "name",
+            RoleClaimType = "Role",
+        };
+
+        // ✅ REQUIRED FOR SIGNALR (VERY IMPORTANT)
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+
+                if (!string.IsNullOrEmpty(accessToken) &&
+                    path.StartsWithSegments("/hubs"))
+                {
+                    context.Token = accessToken;
+                }
+
+                return Task.CompletedTask;
+            }
         };
     });
 
 builder.Services.AddAuthorization();
 
-// ── Controllers + built-in OpenAPI (.NET 10) ──────────────────────────────────
+// ── CONTROLLERS ────────────────────────────────────────
 builder.Services.AddControllers();
-builder.Services.AddOpenApi(opt =>
+
+// ── SWAGGER ───────────────────────────────────────────
+builder.Services.AddEndpointsApiExplorer();
+
+builder.Services.AddSwaggerGen(options =>
 {
-    opt.AddDocumentTransformer((doc, _, _) =>
+    options.SwaggerDoc("v1", new OpenApiInfo
     {
-        doc.Info.Title       = "BGauss Travel API";
-        doc.Info.Version     = "v1";
-        doc.Info.Description = "Travel booking and expense management API for BGauss employees";
-        return Task.CompletedTask;
+        Title = "BGauss Travel API",
+        Version = "v1"
     });
 });
 
 var app = builder.Build();
 
-// ── Middleware pipeline ───────────────────────────────────────────────────────
-if (app.Environment.IsDevelopment())
+// 🔥 CRITICAL FIX FOR IIS (DON’T REMOVE)
+app.UseForwardedHeaders(new ForwardedHeadersOptions
 {
-    app.MapOpenApi();
-    app.MapScalarApiReference(opt =>
-    {
-        opt.Title             = "BGauss Travel API";
-        opt.DefaultHttpClient = new(ScalarTarget.CSharp, ScalarClient.HttpClient);
-    });
-}
+    ForwardedHeaders = ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedFor
+});
 
-app.UseHttpsRedirection();
-app.UseCors();
+
+// ✅ ENABLE SWAGGER ALWAYS (for debugging server)
+app.UseSwagger();
+app.UseSwaggerUI(c =>
+{
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "BGauss Travel API v1");
+    c.RoutePrefix = "swagger";
+});
+
+
+// ❌ DO NOT USE THIS IN IIS (causes your HTTPS errors)
+// app.UseHttpsRedirection();
+
+
 app.UseStaticFiles();
 
-// ⚠️ ORDER MATTERS — must be in this exact sequence
-app.UseAuthentication();   // ← reads + validates the JWT
-app.UseAuthorization();    // ← enforces [Authorize] attributes
+app.UseRouting();   // ✅ MUST BE BEFORE CORS
 
+app.UseCors();
+
+app.UseAuthentication();
+app.UseAuthorization();
+
+
+// ── ROUTES ─────────────────────────────────────────────
 app.MapControllers();
+
 app.MapHub<TravelHub>("/hubs/travel");
 app.MapHub<NotificationHub>("/hubs/notifications");
+
+app.MapFallbackToFile("index.html");
 
 app.Run();

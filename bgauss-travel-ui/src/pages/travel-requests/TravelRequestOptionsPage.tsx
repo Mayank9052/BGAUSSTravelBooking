@@ -1,9 +1,14 @@
 // src/pages/travel-requests/TravelRequestOptionsPage.tsx
+// FIX: Removed useMsalLogin() — it was the cause of the redirect loop.
+//      useMsalLogin calls handleRedirectPromise() which is async.
+//      During that async resolution React re-renders all children,
+//      which caused TravelRequestFormPage's Navigate guard to fire mid-navigation.
+//      Now uses signOutUser() directly — no MSAL state, no race condition.
 
 import { useState, type ChangeEvent, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { useMsalLogin } from "../../auth/useMsalLogin";
 import CommonNavbar from "../../components/layout/CommonNavbar";
+import { signOutUser } from "../../auth/signOut";
 import {
   getSessionUserProfile,
   persistEmployeeDetails,
@@ -46,10 +51,11 @@ type RequestOptionId = (typeof REQUEST_OPTIONS)[number]["id"];
 
 export default function TravelRequestOptionsPage() {
   const navigate    = useNavigate();
-  const { signOut } = useMsalLogin();
   const sessionUser = getSessionUserProfile();
 
   const [selectedOption, setSelectedOption] = useState<RequestOptionId | "">("");
+  const [formError,      setFormError]       = useState<string | null>(null);
+
   const [employeeDetails, setEmployeeDetails] = useState<EditableEmployeeDetails>({
     employeeId:       sessionUser.employeeId       || sessionUser.employeeRecordId || "",
     fullName:         sessionUser.fullName         || "",
@@ -70,25 +76,46 @@ export default function TravelRequestOptionsPage() {
   const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setEmployeeDetails(prev => ({ ...prev, [name]: value }));
+    if (formError) setFormError(null);
   };
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!selectedRequest) return;
-    // Persist filled details so TravelRequestFormPage can read them
+
+    const missing: string[] = [];
+    if (!employeeDetails.employeeId.trim())  missing.push("Employee ID");
+    if (!employeeDetails.fullName.trim())    missing.push("Employee Name");
+    if (!employeeDetails.department.trim())  missing.push("Department");
+    if (!employeeDetails.email.trim())       missing.push("Email");
+    if (!selectedOption)                      missing.push("Mode of Travel");
+
+    if (missing.length > 0) {
+      setFormError(`Please fill in: ${missing.join(", ")}`);
+      return;
+    }
+
+    if (!selectedRequest) {
+      setFormError("Please select a mode of travel.");
+      return;
+    }
+
+    // Persist FIRST, then navigate — localStorage is synchronous so the
+    // next page will always read the correct values on mount
     persistEmployeeDetails(employeeDetails);
-    navigate(selectedRequest.path);
+    setFormError(null);
+
+    // Use replace:false so back button works correctly
+    navigate(selectedRequest.path, { replace: false });
   };
 
   return (
     <div className={styles.page}>
       <CommonNavbar
         user={{ initials, name: fullName, subtitle: role }}
-        onSignOut={async () => signOut()}
+        onSignOut={async () => signOutUser()}
       />
 
       <main className={styles.main}>
-        {/* Hero */}
         <section className={styles.hero}>
           <div className={styles.heroCopy}>
             <span className={styles.heroBadge}>Raise travel request</span>
@@ -96,8 +123,7 @@ export default function TravelRequestOptionsPage() {
               Complete employee details before travel mode selection
             </h1>
             <p className={styles.heroSubtitle}>
-              Fill the required employee details, choose the mode of travel, and continue to
-              the selected request form.
+              Fill the required employee details, choose the mode of travel, and continue to the selected request form.
             </p>
           </div>
           <div className={styles.heroActions}>
@@ -108,20 +134,30 @@ export default function TravelRequestOptionsPage() {
         </section>
 
         <div className={styles.layout}>
-          {/* ── FORM CARD ───────────────────────────────────── */}
           <section className={styles.formCard}>
             <div className={styles.sectionHeader}>
               <div>
                 <p className={styles.sectionEyebrow}>Required fields</p>
                 <h2 className={styles.sectionTitle}>Raise Travel Request</h2>
                 <p className={styles.sectionNote}>
-                  Complete all employee details, choose the mode of travel, then click Continue.
+                  Employee ID, Name, Department and Email are required. Other details are optional.
                 </p>
               </div>
               <span className={styles.typeChip}>
                 {selectedRequest ? selectedRequest.title : "No mode selected"}
               </span>
             </div>
+
+            {formError && (
+              <div style={{
+                padding: "12px 16px", borderRadius: 10, marginBottom: 20,
+                fontSize: 13, fontWeight: 600,
+                background: "#fef2f2", color: "#991b1b",
+                border: "1px solid #fecaca",
+              }}>
+                ❌ {formError}
+              </div>
+            )}
 
             <form onSubmit={handleSubmit}>
               <div className={styles.grid}>
@@ -148,24 +184,24 @@ export default function TravelRequestOptionsPage() {
                 </label>
 
                 <label className={styles.field}>
-                  <span className={styles.label}>Designation *</span>
+                  <span className={styles.label}>Designation</span>
                   <input className={styles.input} name="designation"
                     value={employeeDetails.designation} onChange={handleChange}
-                    placeholder="Enter designation" required />
+                    placeholder="Enter designation (optional)" />
                 </label>
 
                 <label className={styles.field}>
-                  <span className={styles.label}>Reporting Manager *</span>
+                  <span className={styles.label}>Reporting Manager</span>
                   <input className={styles.input} name="reportingManager"
                     value={employeeDetails.reportingManager} onChange={handleChange}
-                    placeholder="Enter reporting manager" required />
+                    placeholder="Enter reporting manager (optional)" />
                 </label>
 
                 <label className={styles.field}>
-                  <span className={styles.label}>Contact Number *</span>
+                  <span className={styles.label}>Contact Number</span>
                   <input className={styles.input} name="contactNumber" type="tel"
                     value={employeeDetails.contactNumber} onChange={handleChange}
-                    placeholder="Enter contact number" required />
+                    placeholder="Enter contact number (optional)" />
                 </label>
 
                 <label className={`${styles.field} ${styles.fieldWide}`}>
@@ -191,14 +227,13 @@ export default function TravelRequestOptionsPage() {
               </div>
 
               <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 24 }}>
-                <button type="submit" className={styles.primaryBtn} disabled={!selectedOption}>
-                  {selectedRequest ? `Continue to ${selectedRequest.title}` : "Continue to Request Form"}
+                <button type="submit" className={styles.primaryBtn}>
+                  {selectedRequest ? `Continue to ${selectedRequest.title} →` : "Continue to Request Form →"}
                 </button>
               </div>
             </form>
           </section>
 
-          {/* ── SIDEBAR ──────────────────────────────────────── */}
           <aside className={styles.sideColumn}>
             <section className={styles.infoCard}>
               <p className={styles.sectionEyebrow}>Current selection</p>
@@ -222,7 +257,7 @@ export default function TravelRequestOptionsPage() {
                     key={o.id}
                     type="button"
                     className={`${styles.optionCard} ${selectedOption === o.id ? styles.optionCardActive : ""}`}
-                    onClick={() => setSelectedOption(o.id)}
+                    onClick={() => { setSelectedOption(o.id); setFormError(null); }}
                   >
                     <span className={styles.optionIcon}>{o.icon}</span>
                     <span className={styles.optionTitle}>{o.title}</span>
