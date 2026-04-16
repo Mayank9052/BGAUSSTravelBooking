@@ -1,6 +1,12 @@
 // src/auth/useMsalLogin.ts
+// KEY FIXES:
+//  1. Removed msalInstance.initialize() from useEffect — main.tsx already calls it.
+//     Calling initialize() twice causes MSAL to reset state and lose the redirect result.
+//  2. onSuccess wrapped in useRef so completeLogin doesn't re-create on every render,
+//     preventing the useEffect from re-running and calling handleRedirectPromise() twice.
+//  3. API call uses relative /api/Auth/ms-login (works in dev via Vite proxy + production IIS).
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { type AuthenticationResult } from "@azure/msal-browser";
 import { msalInstance, graphScopes } from "./msalConfig";
 
@@ -32,80 +38,85 @@ export interface UseMsalLoginReturn {
   signOut:        () => Promise<void>;
   loading:        boolean;
   msalReady:      boolean;
-  isInitializing: boolean;  // ✅ in interface
+  isInitializing: boolean;
   error:          string | null;
   user:           MsUser | null;
 }
 
 const APP_SESSION_KEYS = [
-  "jwt_token",
-  "employee_id",
-  "full_name",
-  "email",
-  "role",
-  "employee_code",
-  "department",
-  "designation",
-  "reporting_manager",
-  "contact_number",
+  "jwt_token", "employee_id", "full_name", "email", "role",
+  "employee_code", "department", "designation", "reporting_manager", "contact_number",
 ] as const;
 
 function clearAppSession(): void {
   APP_SESSION_KEYS.forEach((key) => localStorage.removeItem(key));
 }
 
-export function useMsalLogin(
-  onSuccess?: (user: MsUser) => void
-): UseMsalLoginReturn {
-  // ✅ ALL useState calls must be INSIDE the hook function
+export function useMsalLogin(onSuccess?: (user: MsUser) => void): UseMsalLoginReturn {
   const [loading,        setLoading]        = useState(false);
   const [msalReady,      setMsalReady]      = useState(false);
-  const [isInitializing, setIsInitializing] = useState(true);  // ✅ moved inside
+  const [isInitializing, setIsInitializing] = useState(true);
   const [error,          setError]          = useState<string | null>(null);
   const [user,           setUser]           = useState<MsUser | null>(null);
 
-  const completeLogin = useCallback(async (
-    result: AuthenticationResult
-  ): Promise<void> => {
+  // Keep onSuccess in a ref so completeLogin doesn't change identity
+  // when the parent re-renders (which would cause the useEffect to re-run)
+  const onSuccessRef = useRef(onSuccess);
+  useEffect(() => { onSuccessRef.current = onSuccess; }, [onSuccess]);
+
+  const completeLogin = useCallback(async (result: AuthenticationResult): Promise<void> => {
     setLoading(true);
     setError(null);
-
     try {
       const msToken = result.accessToken;
 
+      // Fetch user profile from Microsoft Graph
       const graphRes = await fetch(
         "https://graph.microsoft.com/v1.0/me?$select=displayName,mail,userPrincipalName,department,employeeId,jobTitle,mobilePhone,businessPhones",
         { headers: { Authorization: `Bearer ${msToken}` } }
       );
+      if (!graphRes.ok) throw new Error(`Microsoft Graph error: ${graphRes.status}`);
 
-      if (!graphRes.ok)
-        throw new Error(`Microsoft Graph error: ${graphRes.status}`);
+      const profile = await graphRes.json() as {
+        displayName?: string;
+        mail?: string;
+        userPrincipalName?: string;
+        department?: string;
+        employeeId?: string;
+        jobTitle?: string;
+        mobilePhone?: string;
+      };
 
-      const profile = await graphRes.json();
+      const email        = (profile.mail ?? profile.userPrincipalName ?? "").toLowerCase().trim();
+      if (!email)        throw new Error("Email not found in Microsoft account.");
 
-      const email = (profile.mail ?? profile.userPrincipalName ?? "").toLowerCase().trim();
-      if (!email) throw new Error("Email not found");
+      const displayName   = profile.displayName ?? email;
+      const department    = profile.department ?? "";
+      const employeeCode  = (profile.employeeId ?? email.split("@")[0]).toUpperCase();
+      const designation   = profile.jobTitle ?? "";
+      const contactNumber = profile.mobilePhone ?? "";
 
-      const displayName    = profile.displayName ?? email;
-      const department     = profile.department ?? "";
-      const employeeId     = profile.employeeId ?? "";
-      const employeeCode   = (profile.employeeId ?? email.split("@")[0]).toUpperCase();
-      const designation    = profile.jobTitle ?? "";
-      const contactNumber  = profile.mobilePhone ?? "";
-
-      const apiRes = await fetch("https://localhost:7136/api/Auth/ms-login", {
+      // ✅ RELATIVE URL — Vite proxies /api → backend in dev
+      //                   IIS serves /api directly in production
+      const apiRes = await fetch("/api/Auth/ms-login", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, displayName, employeeId: employeeId, department }),
+        body: JSON.stringify({
+          email,
+          displayName,
+          employeeId: employeeCode,
+          department,
+        }),
       });
 
       if (!apiRes.ok) {
-        const err = await apiRes.json();
-        throw new Error(err.message ?? "API error");
+        const errBody = await apiRes.json().catch(() => ({ message: `HTTP ${apiRes.status}` })) as { message?: string };
+        throw new Error(errBody.message ?? `API error: ${apiRes.status}`);
       }
 
-      const apiData: MsLoginApiResponse = await apiRes.json();
+      const apiData = await apiRes.json() as MsLoginApiResponse;
 
+      // Persist to localStorage
       localStorage.setItem("jwt_token",      apiData.token);
       localStorage.setItem("employee_id",    String(apiData.employeeId));
       localStorage.setItem("full_name",      apiData.displayName);
@@ -113,6 +124,8 @@ export function useMsalLogin(
       localStorage.setItem("role",           apiData.role);
       localStorage.setItem("employee_code",  apiData.employeeCode);
       localStorage.setItem("department",     apiData.department ?? "");
+      localStorage.setItem("designation",    designation);
+      localStorage.setItem("contact_number", contactNumber);
 
       const msUser: MsUser = {
         email:        apiData.email,
@@ -127,22 +140,29 @@ export function useMsalLogin(
       };
 
       setUser(msUser);
-      onSuccess?.(msUser);
+      setError(null);
+      onSuccessRef.current?.(msUser);
 
-    } catch (err: any) {
-      console.error("❌ Login failed", err);
-      setError(err.message);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Sign-in failed. Please try again.";
+      setError(msg);
+      console.error("❌ Login failed:", msg);
     } finally {
       setLoading(false);
     }
-  }, [onSuccess]);
+  }, []); // ← no dependencies: onSuccess is via ref, msalInstance is module-level singleton
 
+  // ── One-time MSAL redirect handler ──────────────────────────────────────────
+  // main.tsx already called msalInstance.initialize() before mounting React.
+  // We only need to handle the redirect result here — DO NOT call initialize() again.
   useEffect(() => {
     let cancelled = false;
 
-    const init = async () => {
+    const handleRedirect = async () => {
       try {
+        // Pick up the token if the user just came back from Microsoft login
         const result = await msalInstance.handleRedirectPromise();
+
         if (cancelled) return;
 
         if (result?.account) {
@@ -150,40 +170,45 @@ export function useMsalLogin(
           await completeLogin(result);
         }
 
-        setMsalReady(true);
-      } catch (err: any) {
-        console.error("❌ MSAL error", err);
-        setError(err.message);
-        setMsalReady(true);
+        if (!cancelled) setMsalReady(true);
+      } catch (e: unknown) {
+        if (!cancelled) {
+          const msg = e instanceof Error ? e.message : "Auth initialization failed.";
+          setError(msg);
+          setMsalReady(true);
+          console.error("❌ MSAL redirect error:", msg);
+        }
       } finally {
-        if (!cancelled) setIsInitializing(false);  // ✅ unblocks PrivateRoute
+        if (!cancelled) setIsInitializing(false);
       }
     };
 
-    void init();
+    void handleRedirect();
     return () => { cancelled = true; };
-  }, [completeLogin]);
+  }, [completeLogin]); // completeLogin is stable (no deps)
 
-  const signIn = useCallback(() => {
+  const signIn = useCallback((): void => {
     if (!msalReady) return;
     setError(null);
     setLoading(true);
     setUser(null);
     clearAppSession();
 
-    msalInstance.loginRedirect({
+    void msalInstance.loginRedirect({
       ...graphScopes,
       prompt: "login",
-    }).catch((err) => {
-      console.error(err);
-      setError(err.message);
+    }).catch((e: unknown) => {
+      const msg = e instanceof Error ? e.message : "Sign-in redirect failed.";
+      setError(msg);
       setLoading(false);
     });
   }, [msalReady]);
 
-  const signOut = useCallback(async () => {
+  const signOut = useCallback(async (): Promise<void> => {
     clearAppSession();
     setUser(null);
+    msalInstance.setActiveAccount(null);
+    // Replace history so back button doesn't return to a protected page
     window.location.replace("/login");
   }, []);
 

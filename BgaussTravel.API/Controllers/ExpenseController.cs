@@ -218,6 +218,45 @@ public class ExpenseController : ControllerBase
         return Ok(new { claim.ClaimId, claim.BillPath, claim.BillFileName });
     }
 
+    // GET /api/Expense/{id}/bill
+    [HttpGet("{id:int}/bill")]
+    public async Task<IActionResult> GetBill(int id)
+    {
+        var empId = CurrentEmployeeId;
+
+        var claim = await _db.ExpenseClaims.FindAsync(id);
+        if (claim == null || string.IsNullOrEmpty(claim.BillPath))
+            return NotFound(new { message = "Bill not found." });
+
+        // Security check
+        if (CurrentRole == "Employee" && claim.EmployeeId != empId)
+            return Forbid();
+
+        var filePath = Path.Combine(_env.WebRootPath ?? "wwwroot",
+                                claim.BillPath.TrimStart('/').Replace("/", Path.DirectorySeparatorChar.ToString()));
+
+        if (!System.IO.File.Exists(filePath))
+            return NotFound(new { message = "File missing on server." });
+
+        var contentType = GetContentType(filePath);
+        var fileName = claim.BillFileName ?? Path.GetFileName(filePath);
+
+        return PhysicalFile(filePath, contentType, fileName);
+    }
+
+    private string GetContentType(string path)
+{
+    var ext = Path.GetExtension(path).ToLowerInvariant();
+
+    return ext switch
+    {
+        ".pdf" => "application/pdf",
+        ".jpg" or ".jpeg" => "image/jpeg",
+        ".png" => "image/png",
+        _ => "application/octet-stream"
+    };
+}
+
     // PUT /api/Expense/{id}/approve  (Admin/HR — role checked on frontend)
     [HttpPut("{id:int}/approve")]
     public async Task<IActionResult> Approve(int id, [FromBody] ApprovalActionDto dto)

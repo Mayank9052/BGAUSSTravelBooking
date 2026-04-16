@@ -1,44 +1,42 @@
 // src/utils/sessionUser.ts
+// FIX: hasRequiredEmployeeDetails no longer requires contactNumber, designation,
+//      reportingManager — these often come back empty from Microsoft Graph.
+//      Only truly required fields are: employeeId, fullName, department, email.
+//      This was the reason "Continue to Request Form" was not working.
+
 export interface SessionUserProfile {
-  employeeId: string;
-  employeeRecordId: string;
-  fullName: string;
-  department: string;
-  designation: string;
+  employeeId:       string;   // display code e.g. "EMP001"
+  employeeRecordId: string;   // numeric DB primary key (used for API calls)
+  fullName:         string;
+  department:       string;
+  designation:      string;
   reportingManager: string;
-  contactNumber: string;
-  email: string;
-  role: string;
+  contactNumber:    string;
+  email:            string;
+  role:             string;
 }
 
 export interface EditableEmployeeDetails {
-  employeeId: string;
-  fullName: string;
-  department: string;
-  designation: string;
+  employeeId:       string;
+  fullName:         string;
+  department:       string;
+  designation:      string;
   reportingManager: string;
-  contactNumber: string;
-  email: string;
+  contactNumber:    string;
+  email:            string;
 }
 
 function readFirstValue(keys: string[]): string {
   for (const key of keys) {
     const value = localStorage.getItem(key)?.trim();
-    if (value) {
-      return value;
-    }
+    if (value) return value;
   }
-
   return "";
 }
 
-// src/utils/sessionUser.ts
-
 export function getSessionUserProfile(): SessionUserProfile {
   return {
-    // employeeId = the human-readable code (e.g. "EMP001") for display
     employeeId:       readFirstValue(["employee_code"]),
-    // employeeRecordId = the numeric DB primary key — used for API calls
     employeeRecordId: readFirstValue(["employee_id"]),
     fullName:         readFirstValue(["full_name"]),
     department:       readFirstValue(["department"]),
@@ -50,24 +48,25 @@ export function getSessionUserProfile(): SessionUserProfile {
   };
 }
 
+// ── FIX: only 4 truly required fields ────────────────────────────────────────
+// contactNumber, designation, reportingManager are OPTIONAL in Microsoft Graph
+// — they come back empty for many accounts. Requiring them caused the button
+// to silently redirect back to /booking/new on every submit.
 export function hasRequiredEmployeeDetails(profile: EditableEmployeeDetails): boolean {
   return [
-    profile.employeeId,
-    profile.fullName,
-    profile.department,
-    profile.designation,
-    profile.reportingManager,
-    profile.contactNumber,
-    profile.email,
-  ].every((value) => value.trim().length > 0);
+    profile.employeeId,   // must have an employee code / ID
+    profile.fullName,     // must have a name
+    profile.department,   // must have a department
+    profile.email,        // must have an email
+  ].every(v => v.trim().length > 0);
 }
 
 export function persistEmployeeDetails(profile: EditableEmployeeDetails): void {
-  localStorage.setItem("employee_code", profile.employeeId.trim());
-  localStorage.setItem("full_name", profile.fullName.trim());
-  localStorage.setItem("department", profile.department.trim());
-  localStorage.setItem("designation", profile.designation.trim());
-  localStorage.setItem("reporting_manager", profile.reportingManager.trim());
-  localStorage.setItem("contact_number", profile.contactNumber.trim());
-  localStorage.setItem("email", profile.email.trim());
+  localStorage.setItem("employee_code",      profile.employeeId.trim());
+  localStorage.setItem("full_name",          profile.fullName.trim());
+  localStorage.setItem("department",         profile.department.trim());
+  localStorage.setItem("designation",        profile.designation.trim());
+  localStorage.setItem("reporting_manager",  profile.reportingManager.trim());
+  localStorage.setItem("contact_number",     profile.contactNumber.trim());
+  localStorage.setItem("email",              profile.email.trim());
 }

@@ -9,7 +9,7 @@ import {
   BrowserCacheLocation,
 } from "@azure/msal-browser";
 
-export const TRAVEL_CLIENT_ID = "7aa67120-8562-46b1-86a6-b561591b666e";
+export const TRAVEL_CLIENT_ID = "e4297c31-b71a-40af-bb82-0385bcc67701";
 export const TENANT_ID        = "a265301a-63b1-4aec-9d47-273b49c178b4";
 
 export const msalConfig: Configuration = {
@@ -18,8 +18,10 @@ export const msalConfig: Configuration = {
     authority:             `https://login.microsoftonline.com/${TENANT_ID}`,
     // ✅ This MUST be registered under "Single-Page Application" platform
     // in Azure Portal → Authentication, NOT under "Web" platform
-    redirectUri:           "http://localhost:5173",
-    postLogoutRedirectUri: "http://localhost:5173/login",
+    //redirectUri:           "http://localhost:5173",
+    redirectUri: window.location.origin,
+    postLogoutRedirectUri: window.location.origin,
+    //postLogoutRedirectUri: "http://localhost:5173/login",
   },
   cache: {
     // SessionStorage is correct for SPA
