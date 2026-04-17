@@ -1,743 +1,192 @@
 // src/pages/reports/ReportsPage.tsx
-// Changes:
-//  - Real Chart.js bar charts using react-chartjs-2 OR inline canvas via useEffect
-//  - We use inline canvas approach (no extra package dependency) via useEffect + Chart.js CDN-style
-//  - Grouped bar chart for requests by status
-//  - Horizontal bar chart for transport modes
-//  - Donut chart for expense status breakdown
-//  - Stacked bar for expense amounts by status
-//  - All charts rendered via useRef + Chart.js from npm (assumed available via vite/cra)
+// FIXES:
+//  1. Employee "By Travel Mode":
+//     - Calls /Report/my-transport (employee-scoped) NOT /Report/by-transport (all employees)
+//     - Drawer shows only this employee's own trips for that mode
+//  2. Custom date filter:
+//     - getRange() used consistently for ALL endpoints
+//     - from/to passed to by-transport, dashboard, by-employee, by-department
+//     - Apply button calls load() which re-fetches with updated range
+//  3. Export: PDF (print dialog) + Excel (CSV download) on every section
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { useMsalLogin } from "../../auth/useMsalLogin";
+import { signOutUser } from "../../auth/signOut";
 import CommonNavbar from "../../components/layout/CommonNavbar";
 import { get } from "../../services/apiClient";
 import {
-  Chart,
-  BarController, BarElement,
-  DoughnutController, ArcElement,
-  CategoryScale, LinearScale,
-  Tooltip, Legend,
+  Chart, BarController, BarElement,
+  CategoryScale, LinearScale, Tooltip, Legend,
   type ChartConfiguration,
 } from "chart.js";
-import styles from "./ReportsPage.module.css";
+Chart.register(BarController, BarElement, CategoryScale, LinearScale, Tooltip, Legend);
 
-// Register Chart.js components (tree-shakeable)
-Chart.register(
-  BarController, BarElement,
-  DoughnutController, ArcElement,
-  CategoryScale, LinearScale,
-  Tooltip, Legend,
-);
+interface Summary { totalRequests:number; pendingRequests:number; approvedRequests:number; rejectedRequests:number; totalExpenses:number; pendingExpenses:number; approvedExpenses:number; totalEmployees:number; }
+interface TransportStat  { transport:string; count:number; totalAmount:number; }
+interface ModeEmployee   { employeeId:number; employeeName:string; employeeCode:string; department:string; requestCode:string; status:string; destination:string; departureDate:string; }
+interface EmployeeStat   { displayName:string; employeeCode:string; totalAmount:number; claimCount:number; approved:number; pending:number; }
+interface DepartmentStat { department:string; requestCount:number; expenseTotal:number; approved:number; pending:number; }
+type PeriodType="weekly"|"monthly"|"yearly"|"custom";
+type EmployeeTab="overview"|"bymode";
+type AdminTab="overview"|"analytics";
+type AnalyticsView="mode"|"employee"|"department";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-interface DashboardSummary {
-  totalRequests: number; pendingRequests: number;
-  approvedRequests: number; rejectedRequests: number;
-  totalExpenses: number; pendingExpenses: number;
-  approvedExpenses: number; totalEmployees: number;
+const fmt=(n:number)=>n>=10000000?`₹${(n/10000000).toFixed(1)}Cr`:n>=100000?`₹${(n/100000).toFixed(1)}L`:n>=1000?`₹${(n/1000).toFixed(1)}K`:`₹${n.toFixed(0)}`;
+const fmtDate=(d:string)=>{try{return new Date(d).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"2-digit"});}catch{return d;}};
+const today=new Date(), toISO=(d:Date)=>d.toISOString().slice(0,10);
+const G="#f1f5f9",FF="'Segoe UI',system-ui,sans-serif";
+const TC:Record<string,string>={Flight:"#3b82f6",Train:"#10b981",Cab:"#f59e0b",Hotel:"#8b5cf6",Multiple:"#ef4444"};
+const DC=["#3b82f6","#10b981","#f59e0b","#ef4444","#8b5cf6","#06b6d4","#f97316","#84cc16"];
+const SB:Record<string,React.CSSProperties>={Approved:{background:"#dcfce7",color:"#15803d"},Rejected:{background:"#fee2e2",color:"#b91c1c"},Submitted:{background:"#fef9c3",color:"#854d0e"},UnderReview:{background:"#dbeafe",color:"#1e40af"},Reimbursed:{background:"#ede9fe",color:"#6d28d9"}};
+function gp<T extends object>(obj:T,key:string):number|string{return(obj as Record<string,number|string>)[key]??0;}
+function getPeriodDates(p:PeriodType){const to=toISO(today),d=new Date(today);if(p==="weekly"){d.setDate(d.getDate()-7);return{from:toISO(d),to};}if(p==="monthly"){d.setMonth(d.getMonth()-1);return{from:toISO(d),to};}if(p==="yearly"){d.setFullYear(d.getFullYear()-1);return{from:toISO(d),to};}return{from:"",to:""};}
+function useChart(ref:React.RefObject<HTMLCanvasElement|null>,cfg:ChartConfiguration|null,onClick?:(i:number)=>void){
+  useEffect(()=>{if(!ref.current||!cfg)return;const c=new Chart(ref.current,{...cfg,options:{...cfg.options,onClick:onClick?(_,els)=>{if(els[0])onClick(els[0].index);}:cfg.options?.onClick}});return()=>c.destroy();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[JSON.stringify(cfg)]);}
+
+// Export helpers
+function exportCSV(rows:Record<string,string|number>[],fname:string){
+  if(!rows.length)return;const h=Object.keys(rows[0]);
+  const lines=[h.join(","),...rows.map(r=>h.map(k=>{const v=String(r[k]??"");return v.includes(",")||v.includes('"')?`"${v.replace(/"/g,'""')}"`:`${v}`;}).join(","))];
+  const blob=new Blob([lines.join("\n")],{type:"text/csv;charset=utf-8;"});
+  const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=`${fname}.csv`;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
 }
-interface TransportStat { transport: string; count: number; totalAmount: number; }
-interface EmployeeStat  { displayName: string; employeeCode: string; totalAmount: number; claimCount: number; approved: number; pending: number; }
-interface StatusStat    {
-  requests: { status: string; count: number }[];
-  expenses: { status: string; count: number; total: number }[];
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-const STATUS_COLORS: Record<string, string> = {
-  Approved: "#22c55e", Submitted: "#f59e0b", Rejected: "#ef4444",
-  Reimbursed: "#8b5cf6", Draft: "#94a3b8", UnderReview: "#3b82f6",
-};
-
-const TRANSPORT_ICONS: Record<string, string> = {
-  Flight: "✈️", Train: "🚆", Cab: "🚕", Hotel: "🏨",
-};
-
-const CHART_COLORS = {
-  approved:   { bg: "#22c55e22", border: "#22c55e" },
-  pending:    { bg: "#f59e0b22", border: "#f59e0b" },
-  rejected:   { bg: "#ef444422", border: "#ef4444" },
-  reimbursed: { bg: "#8b5cf622", border: "#8b5cf6" },
-  flight:     { bg: "#3b82f622", border: "#3b82f6" },
-  train:      { bg: "#06b6d422", border: "#06b6d4" },
-  cab:        { bg: "#f59e0b22", border: "#f59e0b" },
-  hotel:      { bg: "#8b5cf622", border: "#8b5cf6" },
-};
-
-const fmt = (n: number) =>
-  n >= 100000 ? `₹${(n / 100000).toFixed(1)}L` :
-  n >= 1000   ? `₹${(n / 1000).toFixed(1)}K`   : `₹${n.toFixed(0)}`;
-
-type TabId = "overview" | "transport" | "employees" | "status";
-
-// ── Chart hook — destroy & recreate on data change ────────────────────────────
-function useChart(
-  ref: React.RefObject<HTMLCanvasElement | null>,
-  config: ChartConfiguration | null,
-) {
-  useEffect(() => {
-    if (!ref.current || !config) return;
-    const chart = new Chart(ref.current, config);
-    return () => { chart.destroy(); };
-  }, [config]);   // eslint-disable-line react-hooks/exhaustive-deps
+function exportPDF(title:string,contentId:string){
+  const el=document.getElementById(contentId);if(!el){window.print();return;}
+  const win=window.open("","_blank");if(!win){window.print();return;}
+  win.document.write(`<html><head><title>${title}</title><style>body{font-family:'Segoe UI',sans-serif;padding:24px;color:#0f172a;}table{width:100%;border-collapse:collapse;margin-top:16px;font-size:12px;}th{background:#f8fafc;padding:8px 12px;text-align:left;font-weight:700;border-bottom:2px solid #e2e8f0;font-size:10px;text-transform:uppercase;}td{padding:8px 12px;border-bottom:1px solid #f1f5f9;}h1{font-size:18px;}p{color:#64748b;font-size:12px;}@media print{body{padding:0;}}</style></head><body><h1>${title}</h1><p>Generated: ${new Date().toLocaleString("en-IN")}</p>${el.innerHTML}</body></html>`);
+  win.document.close();setTimeout(()=>{win.print();},400);
 }
 
-// ── Tab button ────────────────────────────────────────────────────────────────
-function TabBtn({ id, label, activeTab, onClick }: {
-  id: TabId; label: string; activeTab: TabId; onClick: () => void;
-}) {
-  return (
-    <button
-      className={`${styles.tab} ${activeTab === id ? styles.tabActive : ""}`}
-      onClick={onClick}>
-      {label}
-    </button>
-  );
+function ExBtn({onCSV,onPDF,label}:{onCSV:()=>void;onPDF:()=>void;label?:string}){
+  const s:React.CSSProperties={display:"flex",alignItems:"center",gap:5,padding:"5px 11px",borderRadius:8,border:"1.5px solid #e2e8f0",background:"#fff",fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:FF,transition:"all 0.15s"};
+  return(<div style={{display:"flex",alignItems:"center",gap:7}}>{label&&<span style={{fontSize:12,color:"#94a3b8",fontWeight:600}}>{label}</span>}<button onClick={onCSV} style={{...s,color:"#15803d"}} onMouseEnter={e=>(e.currentTarget.style.background="#f0fdf4")} onMouseLeave={e=>(e.currentTarget.style.background="#fff")}>📊 Excel</button><button onClick={onPDF} style={{...s,color:"#dc2626"}} onMouseEnter={e=>(e.currentTarget.style.background="#fef2f2")} onMouseLeave={e=>(e.currentTarget.style.background="#fff")}>📄 PDF</button></div>);
 }
 
-// ── Metric card ───────────────────────────────────────────────────────────────
-function MetricCard({ icon, label, value, color }: {
-  icon: string; label: string; value: string | number; color: string;
-}) {
-  return (
-    <div className={styles.statCard}>
-      <div className={styles.statIcon}>{icon}</div>
-      <div className={styles.statValue} style={{ color }}>{value}</div>
-      <div className={styles.statLabel}>{label}</div>
-    </div>
-  );
+function KPI({icon,label,value,color}:{icon:string;label:string;value:string|number;color:string}){
+  return(<div style={{background:"#fff",borderRadius:14,padding:"16px 18px",border:`1.5px solid ${color}22`,boxShadow:`0 2px 10px ${color}11`,display:"flex",flexDirection:"column",gap:5,position:"relative",overflow:"hidden"}}><div style={{position:"absolute",top:-12,right:-12,width:60,height:60,borderRadius:"50%",background:`${color}11`}}/><div style={{fontSize:18}}>{icon}</div><div style={{fontSize:24,fontWeight:900,color,letterSpacing:"-0.5px"}}>{value}</div><div style={{fontSize:12,fontWeight:700,color:"#64748b"}}>{label}</div></div>);
 }
 
-// ── Overview Charts Component ─────────────────────────────────────────────────
-function OverviewCharts({ summary }: { summary: DashboardSummary }) {
-  const requestBarRef  = useRef<HTMLCanvasElement>(null);
-  const expenseBarRef  = useRef<HTMLCanvasElement>(null);
+function PF({period,setPeriod,cf,scf,ct,sct,onApply}:{period:PeriodType;setPeriod:(p:PeriodType)=>void;cf:string;scf:(s:string)=>void;ct:string;sct:(s:string)=>void;onApply:()=>void}){
+  return(<div style={{background:"#fff",borderRadius:12,padding:"10px 16px",marginBottom:18,border:"1.5px solid #e2e8f0",display:"flex",alignItems:"center",flexWrap:"wrap",gap:10}}><span style={{fontSize:12,fontWeight:700,color:"#64748b"}}>📅 Period:</span><div style={{display:"flex",background:"#f1f5f9",borderRadius:8,padding:2,gap:1}}>{(["weekly","monthly","yearly","custom"] as PeriodType[]).map(k=>(<button key={k} onClick={()=>setPeriod(k)} style={{padding:"5px 10px",borderRadius:6,border:"none",fontSize:11,fontWeight:700,cursor:"pointer",background:period===k?"#0f172a":"transparent",color:period===k?"#fff":"#64748b",transition:"all 0.12s"}}>{k==="weekly"?"7 Days":k==="monthly"?"30 Days":k==="yearly"?"1 Year":"Custom"}</button>))}</div>{period==="custom"&&(<><input type="date" value={cf} onChange={e=>scf(e.target.value)} style={{padding:"5px 10px",borderRadius:8,border:"1.5px solid #e2e8f0",fontSize:12,fontFamily:FF}}/><span style={{fontSize:12,color:"#94a3b8"}}>→</span><input type="date" value={ct} onChange={e=>sct(e.target.value)} style={{padding:"5px 10px",borderRadius:8,border:"1.5px solid #e2e8f0",fontSize:12,fontFamily:FF}}/></>)}<button onClick={onApply} style={{padding:"5px 12px",background:"#0f172a",color:"#fff",border:"none",borderRadius:8,fontWeight:700,fontSize:12,cursor:"pointer",marginLeft:"auto"}}>Apply →</button></div>);
+}
 
-  const requestBarConfig: ChartConfiguration = {
-    type: "bar",
-    data: {
-      labels: ["Approved", "Pending", "Rejected"],
-      datasets: [{
-        label: "Travel Requests",
-        data: [summary.approvedRequests, summary.pendingRequests, summary.rejectedRequests],
-        backgroundColor: ["#22c55e33", "#f59e0b33", "#ef444433"],
-        borderColor:     ["#22c55e",   "#f59e0b",   "#ef4444"],
-        borderWidth: 2,
-        borderRadius: 6,
-      }],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: ctx => ` ${ctx.parsed.y} requests`,
-          },
-        },
-      },
-      scales: {
-        y: { beginAtZero: true, ticks: { stepSize: 1 }, grid: { color: "#f1f5f9" } },
-        x: { grid: { display: false } },
-      },
-    },
-  };
+function ModeDrawer({mode,list,onClose}:{mode:string;list:ModeEmployee[];onClose:()=>void}){
+  const [q,setQ]=useState("");const[sc,setSc]=useState<"employeeName"|"departureDate"|"status">("departureDate");const[sd,setSd]=useState<"asc"|"desc">("desc");
+  const color=TC[mode]??"#64748b";
+  const tog=(c:typeof sc)=>{if(sc===c)setSd(d=>d==="asc"?"desc":"asc");else{setSc(c);setSd("asc");}};
+  const arr=(c:typeof sc)=>sc===c?(sd==="asc"?" ↑":" ↓"):"";
+  const rows=list.filter(e=>e.employeeName.toLowerCase().includes(q.toLowerCase())||e.employeeCode.toLowerCase().includes(q.toLowerCase())||e.department.toLowerCase().includes(q.toLowerCase())||e.destination.toLowerCase().includes(q.toLowerCase())).sort((a,b)=>{const v=a[sc].localeCompare(b[sc]);return sd==="asc"?v:-v;});
+  const csv=rows.map(r=>({Employee:r.employeeName,Code:r.employeeCode,Department:r.department,Request:r.requestCode,Destination:r.destination,Departure:fmtDate(r.departureDate),Status:r.status}));
+  return(<div id={`md-${mode}`} style={{background:"#fff",borderRadius:16,border:`2px solid ${color}44`,boxShadow:"0 4px 20px rgba(0,0,0,0.08)"}}><div style={{padding:"12px 18px",background:`${color}11`,borderBottom:`1.5px solid ${color}22`,borderRadius:"14px 14px 0 0",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}><span style={{fontWeight:800,fontSize:14,color:"#0f172a"}}>{mode} — {list.length} record{list.length!==1?"s":""}</span><div style={{display:"flex",gap:8,alignItems:"center"}}><ExBtn onCSV={()=>exportCSV(csv,`${mode}-trips`)} onPDF={()=>exportPDF(`${mode} Requests`,`md-${mode}`)}/><button onClick={onClose} style={{background:"none",border:"none",cursor:"pointer",fontSize:16,color:"#94a3b8"}}>✕</button></div></div><div style={{padding:"10px 18px",borderBottom:"1px solid #f1f5f9"}}><input type="text" value={q} onChange={e=>setQ(e.target.value)} placeholder="🔍 Search name, code, dept, destination…" style={{width:"100%",padding:"7px 12px",borderRadius:8,border:"1.5px solid #e2e8f0",fontSize:13,fontFamily:FF,outline:"none",boxSizing:"border-box"}}/></div><div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}><thead><tr style={{background:"#f8fafc",borderBottom:"2px solid #e2e8f0"}}>{([["employeeName","Employee"],["_c","Code"],["_d","Dept"],["_r","Request"],["_dest","Destination"],["departureDate","Departure"],["status","Status"]] as[string,string][]).map(([k,l])=>(<th key={l} onClick={()=>(k==="employeeName"||k==="departureDate"||k==="status")&&tog(k as typeof sc)} style={{padding:"9px 12px",textAlign:"left",fontWeight:700,color:"#64748b",fontSize:11,textTransform:"uppercase",letterSpacing:"0.05em",whiteSpace:"nowrap",cursor:(k==="employeeName"||k==="departureDate"||k==="status")?"pointer":"default",userSelect:"none"}}>{l}{(k==="employeeName"||k==="departureDate"||k==="status")?arr(k as typeof sc):""}</th>))}</tr></thead><tbody>{rows.length===0?<tr><td colSpan={7} style={{padding:"20px",textAlign:"center",color:"#94a3b8"}}>No records match.</td></tr>:rows.map((e,i)=>(<tr key={`${e.employeeId}-${i}`} style={{borderBottom:"1px solid #f8fafc"}} onMouseEnter={ev=>(ev.currentTarget.style.background="#f8fafc")} onMouseLeave={ev=>(ev.currentTarget.style.background="transparent")}><td style={{padding:"9px 12px",fontWeight:700,color:"#0f172a"}}><div style={{display:"flex",alignItems:"center",gap:7}}><div style={{width:26,height:26,borderRadius:"50%",background:color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color,flexShrink:0}}>{e.employeeName.split(" ").map(p=>p[0]).slice(0,2).join("").toUpperCase()}</div>{e.employeeName}</div></td><td style={{padding:"9px 12px",color:"#64748b"}}>{e.employeeCode}</td><td style={{padding:"9px 12px",color:"#64748b"}}>{e.department||"—"}</td><td style={{padding:"9px 12px",fontFamily:"monospace",fontWeight:600,color:"#0f172a"}}>{e.requestCode}</td><td style={{padding:"9px 12px",color:"#334155"}}>{e.destination}</td><td style={{padding:"9px 12px",color:"#64748b",whiteSpace:"nowrap"}}>{fmtDate(e.departureDate)}</td><td style={{padding:"9px 12px"}}><span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,...(SB[e.status]??{background:"#f1f5f9",color:"#64748b"})}}>{e.status}</span></td></tr>))}</tbody></table></div><div style={{padding:"8px 18px",borderTop:"1px solid #f1f5f9",background:"#f8fafc",borderRadius:"0 0 14px 14px"}}><span style={{fontSize:11,color:"#94a3b8"}}>{rows.length} of {list.length} records</span></div></div>);
+}
 
-  const expenseBarConfig: ChartConfiguration = {
-    type: "bar",
-    data: {
-      labels: ["Total Expenses", "Pending", "Approved"],
-      datasets: [{
-        label: "Amount (₹)",
-        data: [summary.totalExpenses, summary.pendingExpenses, summary.approvedExpenses],
-        backgroundColor: ["#3b82f633", "#f59e0b33", "#22c55e33"],
-        borderColor:     ["#3b82f6",   "#f59e0b",   "#22c55e"],
-        borderWidth: 2,
-        borderRadius: 6,
-      }],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: ctx => ` ${fmt(ctx.parsed.y as number)}`,
-          },
-        },
-      },
-      scales: {
-        y: { beginAtZero: true, ticks: { callback: v => fmt(v as number) }, grid: { color: "#f1f5f9" } },
-        x: { grid: { display: false } },
-      },
-    },
-  };
+async function fetchModeTrips(mode:string,isAdmin:boolean):Promise<ModeEmployee[]>{
+  const ep=isAdmin?`/api/Booking/all?transport=${encodeURIComponent(mode)}&pageSize=200`:`/api/Booking/my`;
+  const res=await fetch(ep,{headers:{Authorization:`Bearer ${localStorage.getItem("jwt_token")??""}`, "Content-Type":"application/json"}});
+  if(!res.ok)return[];
+  const json=await res.json() as unknown;
+  const all=(Array.isArray(json)?json:((json as{items?:unknown[]}).items??[])) as{employeeId:number;employeeName:string;employeeCode:string;department:string;requestCode:string;status:string;destination:string;departureDate:string;transportType:string;}[];
+  return(isAdmin?all:all.filter(r=>r.transportType===mode)).map(r=>({employeeId:r.employeeId,employeeName:r.employeeName,employeeCode:r.employeeCode,department:r.department,requestCode:r.requestCode,status:r.status,destination:r.destination,departureDate:r.departureDate}));
+}
 
-  useChart(requestBarRef, requestBarConfig);
-  useChart(expenseBarRef, expenseBarConfig);
+function ByTravelModeTab({transport,from,to}:{transport:TransportStat[];from:string;to:string}){
+  const ref=useRef<HTMLCanvasElement>(null);const[sel,setSel]=useState<string|null>(null);const[list,setList]=useState<ModeEmployee[]>([]);const[loading,setLoading]=useState(false);
+  const labels=transport.map(t=>t.transport),colors=labels.map(l=>TC[l]??"#64748b");
+  const cfg:ChartConfiguration={type:"bar",data:{labels,datasets:[{label:"My Trips",data:transport.map(t=>t.count),backgroundColor:colors.map((c,i)=>sel===labels[i]?c+"ff":c+"44"),borderColor:colors,borderWidth:2,borderRadius:8}]},options:{indexAxis:"y",responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>[` ${ctx.parsed.x} trips`,` ${fmt(transport[ctx.dataIndex]?.totalAmount??0)}`, " — Click for details"]}}},scales:{x:{beginAtZero:true,ticks:{stepSize:1},grid:{color:G}},y:{grid:{display:false}}}}};
+  const click=async(idx:number)=>{const m=labels[idx];if(sel===m){setSel(null);setList([]);return;}setSel(m);setLoading(true);setList(await fetchModeTrips(m,false));setLoading(false);};
+  useChart(ref,cfg,click);
+  const csv=transport.map(t=>({Mode:t.transport,"Total Trips":t.count,"Total Amount":t.totalAmount,"From":from||"All","To":to||"All"}));
+  return(<div style={{display:"flex",flexDirection:"column",gap:18}}><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:10}}>{transport.map((t,i)=>{const c=TC[t.transport]??"#64748b";return(<div key={t.transport} onClick={()=>void click(i)} style={{background:sel===t.transport?c+"11":"#fff",border:`1.5px solid ${sel===t.transport?c:"#e2e8f0"}`,borderRadius:12,padding:"12px 14px",cursor:"pointer",transition:"all 0.15s"}}><div style={{fontSize:20,marginBottom:3}}>{t.transport==="Flight"?"✈️":t.transport==="Train"?"🚆":t.transport==="Cab"?"🚕":t.transport==="Hotel"?"🏨":"🗺️"}</div><div style={{fontSize:22,fontWeight:900,color:c}}>{t.count}</div><div style={{fontSize:12,fontWeight:700,color:"#64748b"}}>{t.transport}</div><div style={{fontSize:11,color:"#94a3b8"}}>{fmt(t.totalAmount)}</div></div>);})}</div><div id="emp-mode-chart" style={{background:"#fff",borderRadius:16,padding:"18px 22px",border:"1.5px solid #e2e8f0",boxShadow:"0 2px 8px rgba(0,0,0,0.05)"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4,flexWrap:"wrap",gap:8}}><div><p style={{fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.08em",margin:0}}>My Trips by Mode — Click bar for trip details</p><p style={{fontSize:12,color:"#94a3b8",margin:"4px 0 0"}}>{sel?`Showing: ${sel}`:"Select a bar"}{from?` · ${from} → ${to}`:""}</p></div><ExBtn onCSV={()=>exportCSV(csv,"my-trips-by-mode")} onPDF={()=>exportPDF("My Travel Mode Report","emp-mode-chart")}/></div><div style={{height:Math.max(160,transport.length*54+40),position:"relative"}}><canvas ref={ref} style={{cursor:"pointer"}} role="img" aria-label="My trip count by mode">{transport.map(t=>`${t.transport}: ${t.count}`).join(", ")}</canvas></div></div>{sel&&(loading?<div style={{background:"#fff",borderRadius:16,padding:"28px 24px",border:"1.5px solid #e2e8f0",textAlign:"center",color:"#94a3b8"}}>⏳ Loading {sel} trips…</div>:<ModeDrawer mode={sel} list={list} onClose={()=>{setSel(null);setList([]);}}/>)}</div>);
+}
 
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
-      {/* Request status bar */}
-      <div className={styles.card}>
-        <p className={styles.cardEyebrow}>Requests by Status</p>
-        <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
-          {[{ label: "Approved", color: "#22c55e", val: summary.approvedRequests },
-            { label: "Pending",  color: "#f59e0b", val: summary.pendingRequests  },
-            { label: "Rejected", color: "#ef4444", val: summary.rejectedRequests }].map(l => (
-            <div key={l.label} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#64748b" }}>
-              <div style={{ width: 10, height: 10, borderRadius: 2, background: l.color }} />
-              {l.label}: <strong style={{ color: "#0f172a" }}>{l.val}</strong>
-            </div>
-          ))}
-        </div>
-        <div style={{ position: "relative", height: 200 }}>
-          <canvas ref={requestBarRef}
-            role="img"
-            aria-label={`Bar chart: ${summary.approvedRequests} approved, ${summary.pendingRequests} pending, ${summary.rejectedRequests} rejected requests`}>
-            Approved: {summary.approvedRequests}, Pending: {summary.pendingRequests}, Rejected: {summary.rejectedRequests}
-          </canvas>
-        </div>
-      </div>
-
-      {/* Expense amount bar */}
-      <div className={styles.card}>
-        <p className={styles.cardEyebrow}>Expense Pipeline (₹)</p>
-        <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
-          {[{ label: "Total",    color: "#3b82f6", val: fmt(summary.totalExpenses)    },
-            { label: "Pending",  color: "#f59e0b", val: fmt(summary.pendingExpenses)  },
-            { label: "Approved", color: "#22c55e", val: fmt(summary.approvedExpenses) }].map(l => (
-            <div key={l.label} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#64748b" }}>
-              <div style={{ width: 10, height: 10, borderRadius: 2, background: l.color }} />
-              {l.label}: <strong style={{ color: "#0f172a" }}>{l.val}</strong>
-            </div>
-          ))}
-        </div>
-        <div style={{ position: "relative", height: 200 }}>
-          <canvas ref={expenseBarRef}
-            role="img"
-            aria-label={`Bar chart of expense amounts: Total ${fmt(summary.totalExpenses)}, Pending ${fmt(summary.pendingExpenses)}, Approved ${fmt(summary.approvedExpenses)}`}>
-            Total: {fmt(summary.totalExpenses)}, Pending: {fmt(summary.pendingExpenses)}, Approved: {fmt(summary.approvedExpenses)}
-          </canvas>
-        </div>
+function AdminAnalytics({transport,employees,departments,from,to}:{transport:TransportStat[];employees:EmployeeStat[];departments:DepartmentStat[];from:string;to:string}){
+  const[view,setView]=useState<AnalyticsView>("mode");const[q,setQ]=useState("");const[sc,setSc]=useState("totalAmount");const[sd,setSd]=useState<"asc"|"desc">("desc");const[sel,setSel]=useState<string|null>(null);const[list,setList]=useState<ModeEmployee[]>([]);const[loadingM,setLoadingM]=useState(false);const ref=useRef<HTMLCanvasElement>(null);
+  const tog=(c:string)=>{if(sc===c)setSd(d=>d==="asc"?"desc":"asc");else{setSc(c);setSd("desc");}};const arr=(c:string)=>sc===c?(sd==="asc"?" ↑":" ↓"):"";
+  const chView=(v:AnalyticsView)=>{setView(v);setQ("");setSc(v==="employee"?"totalAmount":v==="department"?"requestCount":"count");setSd("desc");setSel(null);setList([]);};
+  const labels=transport.map(t=>t.transport),tColors=labels.map(l=>TC[l]??"#64748b");
+  const empRows=employees.filter(e=>e.displayName.toLowerCase().includes(q.toLowerCase())||e.employeeCode.toLowerCase().includes(q.toLowerCase())).sort((a,b)=>{const va=gp(a,sc),vb=gp(b,sc);const c=typeof va==="number"?va-(vb as number):String(va).localeCompare(String(vb));return sd==="asc"?c:-c;});
+  const deptRows=departments.filter(d=>d.department.toLowerCase().includes(q.toLowerCase())).sort((a,b)=>{const va=gp(a,sc),vb=gp(b,sc);const c=typeof va==="number"?va-(vb as number):String(va).localeCompare(String(vb));return sd==="asc"?c:-c;});
+  const cfg:ChartConfiguration|null=view==="mode"&&transport.length>0?{type:"bar",data:{labels,datasets:[{label:"Trips",data:transport.map(t=>t.count),backgroundColor:tColors.map((c,i)=>sel===labels[i]?c+"ff":c+"44"),borderColor:tColors,borderWidth:2,borderRadius:8}]},options:{indexAxis:"y",responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>[` ${ctx.parsed.x} trips`,` ${fmt(transport[ctx.dataIndex]?.totalAmount??0)}`," — Click for list"]}}},scales:{x:{beginAtZero:true,ticks:{stepSize:1},grid:{color:G}},y:{grid:{display:false}}}}}:view==="employee"&&empRows.length>0?{type:"bar",data:{labels:empRows.slice(0,8).map(e=>e.displayName.split(" ")[0]),datasets:[{label:"Approved",data:empRows.slice(0,8).map(e=>e.approved),backgroundColor:"#10b98133",borderColor:"#10b981",borderWidth:2,borderRadius:6},{label:"Pending",data:empRows.slice(0,8).map(e=>e.pending),backgroundColor:"#f59e0b33",borderColor:"#f59e0b",borderWidth:2,borderRadius:6}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:"top",labels:{font:{size:11}}},tooltip:{mode:"index",intersect:false}},scales:{y:{beginAtZero:true,ticks:{stepSize:1},grid:{color:G}},x:{grid:{display:false}}}}}:view==="department"&&deptRows.length>0?{type:"bar",data:{labels:deptRows.slice(0,8).map(d=>d.department||"Unknown"),datasets:[{label:"Requests",data:deptRows.slice(0,8).map(d=>d.requestCount),backgroundColor:deptRows.slice(0,8).map((_,i)=>DC[i%DC.length]+"33"),borderColor:deptRows.slice(0,8).map((_,i)=>DC[i%DC.length]),borderWidth:2,borderRadius:6}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>` ${ctx.parsed.y} requests`}}},scales:{y:{beginAtZero:true,ticks:{stepSize:1},grid:{color:G}},x:{grid:{display:false}}}}}:null;
+  const modeClick=async(idx:number)=>{if(view!=="mode")return;const m=labels[idx];if(!m)return;if(sel===m){setSel(null);setList([]);return;}setSel(m);setLoadingM(true);setList(await fetchModeTrips(m,true));setLoadingM(false);};
+  useChart(ref,cfg,view==="mode"?modeClick:undefined);
+  const empCsv=empRows.map(e=>({Employee:e.displayName,Code:e.employeeCode,Claims:e.claimCount,Approved:e.approved,Pending:e.pending,"Total Amount":e.totalAmount,From:from||"All",To:to||"All"}));
+  const deptCsv=deptRows.map(d=>({Department:d.department||"Unknown",Requests:d.requestCount,Approved:d.approved,Pending:d.pending,"Total Expenses":d.expenseTotal,From:from||"All",To:to||"All"}));
+  const modeCsv=transport.map(t=>({Mode:t.transport,"Trips":t.count,"Amount":t.totalAmount,From:from||"All",To:to||"All"}));
+  return(<div style={{display:"flex",flexDirection:"column",gap:18}}>
+    <div style={{background:"#fff",borderRadius:12,padding:"12px 16px",border:"1.5px solid #e2e8f0",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+      <label style={{fontSize:12,fontWeight:700,color:"#64748b"}}>View:</label>
+      <select value={view} onChange={e=>chView(e.target.value as AnalyticsView)} style={{padding:"6px 12px",borderRadius:8,border:"1.5px solid #e2e8f0",fontSize:13,fontFamily:FF,fontWeight:700,background:"#f8fafc",color:"#0f172a",outline:"none",cursor:"pointer"}}>
+        <option value="mode">✈️  By Travel Mode</option><option value="employee">👤  By Employee</option><option value="department">🏢  By Department</option>
+      </select>
+      {view!=="mode"&&<input type="text" value={q} onChange={e=>setQ(e.target.value)} placeholder={view==="employee"?"🔍 Search employee…":"🔍 Search department…"} style={{flex:1,minWidth:180,padding:"6px 12px",borderRadius:8,border:"1.5px solid #e2e8f0",fontSize:13,fontFamily:FF,outline:"none"}}/>}
+      <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:10}}>
+        <span style={{fontSize:12,color:"#94a3b8"}}>{view==="employee"?`${empRows.length} employees`:view==="department"?`${deptRows.length} departments`:`${transport.length} modes`}</span>
+        <ExBtn onCSV={()=>exportCSV(view==="employee"?empCsv:view==="department"?deptCsv:modeCsv,`analytics-${view}`)} onPDF={()=>exportPDF(`Analytics — ${view}`,"admin-analytics")}/>
       </div>
     </div>
-  );
-}
-
-// ── Transport Charts Component ────────────────────────────────────────────────
-function TransportCharts({ transport }: { transport: TransportStat[] }) {
-  const countBarRef  = useRef<HTMLCanvasElement>(null);
-  const amountBarRef = useRef<HTMLCanvasElement>(null);
-
-  const labels = transport.map(t => t.transport);
-  const colors  = [
-    CHART_COLORS.flight, CHART_COLORS.train, CHART_COLORS.cab, CHART_COLORS.hotel,
-    { bg: "#84cc1622", border: "#84cc16" },
-  ];
-
-  const countConfig: ChartConfiguration = {
-    type: "bar",
-    data: {
-      labels,
-      datasets: [{
-        label: "Trips",
-        data: transport.map(t => t.count),
-        backgroundColor: labels.map((_, i) => colors[i % colors.length].bg),
-        borderColor:     labels.map((_, i) => colors[i % colors.length].border),
-        borderWidth: 2,
-        borderRadius: 8,
-      }],
-    },
-    options: {
-      indexAxis: "y",
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: ctx => ` ${ctx.parsed.x} trips` } },
-      },
-      scales: {
-        x: { beginAtZero: true, ticks: { stepSize: 1 }, grid: { color: "#f1f5f9" } },
-        y: { grid: { display: false } },
-      },
-    },
-  };
-
-  const amountConfig: ChartConfiguration = {
-    type: "bar",
-    data: {
-      labels,
-      datasets: [{
-        label: "Total Amount (₹)",
-        data: transport.map(t => t.totalAmount),
-        backgroundColor: labels.map((_, i) => colors[i % colors.length].bg),
-        borderColor:     labels.map((_, i) => colors[i % colors.length].border),
-        borderWidth: 2,
-        borderRadius: 8,
-      }],
-    },
-    options: {
-      indexAxis: "y",
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: ctx => ` ${fmt(ctx.parsed.x as number)}` } },
-      },
-      scales: {
-        x: { beginAtZero: true, ticks: { callback: v => fmt(v as number) }, grid: { color: "#f1f5f9" } },
-        y: { grid: { display: false } },
-      },
-    },
-  };
-
-  useChart(countBarRef, countConfig);
-  useChart(amountBarRef, amountConfig);
-
-  const barHeight = Math.max(160, transport.length * 48 + 40);
-
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
-      <div className={styles.card}>
-        <p className={styles.cardEyebrow}>Trip Count by Mode</p>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
-          {transport.map((t, i) => (
-            <div key={t.transport} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#64748b" }}>
-              <div style={{ width: 10, height: 10, borderRadius: 2, background: colors[i % colors.length].border }} />
-              {TRANSPORT_ICONS[t.transport] ?? "🚗"} {t.transport}: <strong style={{ color: "#0f172a" }}>{t.count}</strong>
-            </div>
-          ))}
-        </div>
-        <div style={{ position: "relative", height: barHeight }}>
-          <canvas ref={countBarRef}
-            role="img"
-            aria-label={`Horizontal bar chart of trip counts by transport mode`}>
-            {transport.map(t => `${t.transport}: ${t.count} trips`).join(", ")}
-          </canvas>
-        </div>
-      </div>
-
-      <div className={styles.card}>
-        <p className={styles.cardEyebrow}>Spend by Mode (₹)</p>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
-          {transport.map((t, i) => (
-            <div key={t.transport} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#64748b" }}>
-              <div style={{ width: 10, height: 10, borderRadius: 2, background: colors[i % colors.length].border }} />
-              {t.transport}: <strong style={{ color: "#0f172a" }}>{fmt(t.totalAmount)}</strong>
-            </div>
-          ))}
-        </div>
-        <div style={{ position: "relative", height: barHeight }}>
-          <canvas ref={amountBarRef}
-            role="img"
-            aria-label={`Horizontal bar chart of spend by transport mode`}>
-            {transport.map(t => `${t.transport}: ${fmt(t.totalAmount)}`).join(", ")}
-          </canvas>
-        </div>
-      </div>
+    {cfg&&<div style={{background:"#fff",borderRadius:16,padding:"18px 22px",border:"1.5px solid #e2e8f0",boxShadow:"0 2px 8px rgba(0,0,0,0.05)"}}><p style={{fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:4}}>{view==="employee"?"Claims per Employee (Top 8)":view==="department"?"Requests per Department (Top 8)":"Trips by Mode — Click for employee list"}</p>{view==="mode"&&<p style={{fontSize:12,color:"#94a3b8",marginBottom:8}}>{sel?`Showing ${sel} employees below`:"Click any bar to drill down"}</p>}<div style={{height:view==="mode"?Math.max(160,transport.length*54+40):240,position:"relative"}}><canvas ref={ref} style={{cursor:view==="mode"?"pointer":"default"}} role="img" aria-label={`Chart for ${view}`}/></div></div>}
+    {view==="mode"&&sel&&(loadingM?<div style={{background:"#fff",borderRadius:16,padding:"24px",border:"1.5px solid #e2e8f0",textAlign:"center",color:"#94a3b8"}}>⏳ Loading {sel} employees…</div>:<ModeDrawer mode={sel} list={list} onClose={()=>{setSel(null);setList([]);}}/>)}
+    <div id="admin-analytics">
+      {view==="mode"&&<div style={{background:"#fff",borderRadius:16,border:"1.5px solid #e2e8f0",overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}><thead><tr style={{background:"#f8fafc",borderBottom:"2px solid #e2e8f0"}}>{[["_","Mode"],["count","Total Trips"],["totalAmount","Total Amount"]].map(([k,l])=><th key={l} onClick={()=>k!=="_"&&tog(k)} style={{padding:"9px 14px",textAlign:"left",fontWeight:700,color:"#64748b",fontSize:11,textTransform:"uppercase",letterSpacing:"0.05em",cursor:k!=="_"?"pointer":"default",userSelect:"none",whiteSpace:"nowrap"}}>{l}{k!=="_"?arr(k):""}</th>)}</tr></thead><tbody>{transport.map((t,i)=>{const c=TC[t.transport]??"#64748b";return(<tr key={t.transport} style={{borderBottom:"1px solid #f8fafc",cursor:"pointer"}} onClick={()=>void modeClick(i)} onMouseEnter={ev=>(ev.currentTarget.style.background="#f8fafc")} onMouseLeave={ev=>(ev.currentTarget.style.background="transparent")}><td style={{padding:"10px 14px"}}><div style={{display:"flex",alignItems:"center",gap:8}}><div style={{width:10,height:10,borderRadius:2,background:DC[i%DC.length],flexShrink:0}}/><span style={{fontSize:16}}>{t.transport==="Flight"?"✈️":t.transport==="Train"?"🚆":t.transport==="Cab"?"🚕":t.transport==="Hotel"?"🏨":"🗺️"}</span><strong style={{color:"#0f172a"}}>{t.transport}</strong></div></td><td style={{padding:"10px 14px",fontWeight:800,color:c,fontSize:13}}>{t.count}</td><td style={{padding:"10px 14px",fontWeight:800,color:"#1e40af",fontSize:13}}>{fmt(t.totalAmount)}</td></tr>);})}</tbody></table></div>}
+      {view==="employee"&&<div style={{background:"#fff",borderRadius:16,border:"1.5px solid #e2e8f0",overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}><thead><tr style={{background:"#f8fafc",borderBottom:"2px solid #e2e8f0"}}>{[["_","#"],["displayName","Employee"],["employeeCode","Code"],["claimCount","Claims"],["approved","Approved"],["pending","Pending"],["totalAmount","Total Expenses"]].map(([k,l])=><th key={l} onClick={()=>k!=="_"&&tog(k)} style={{padding:"9px 12px",textAlign:"left",fontWeight:700,color:"#64748b",fontSize:11,textTransform:"uppercase",letterSpacing:"0.05em",cursor:k!=="_"?"pointer":"default",userSelect:"none",whiteSpace:"nowrap"}}>{l}{k!=="_"?arr(k):""}</th>)}</tr></thead><tbody>{empRows.length===0?<tr><td colSpan={7} style={{padding:"20px",textAlign:"center",color:"#94a3b8"}}>No employee data.</td></tr>:empRows.map((e,i)=><tr key={e.employeeCode} style={{borderBottom:"1px solid #f8fafc"}} onMouseEnter={ev=>(ev.currentTarget.style.background="#f8fafc")} onMouseLeave={ev=>(ev.currentTarget.style.background="transparent")}><td style={{padding:"9px 12px",color:"#94a3b8",fontWeight:700}}>#{i+1}</td><td style={{padding:"9px 12px"}}><div style={{display:"flex",alignItems:"center",gap:8}}><div style={{width:28,height:28,borderRadius:"50%",background:"#3b82f611",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:"#3b82f6",flexShrink:0}}>{e.displayName.split(" ").map(p=>p[0]).slice(0,2).join("").toUpperCase()}</div><strong style={{color:"#0f172a"}}>{e.displayName}</strong></div></td><td style={{padding:"9px 12px",color:"#64748b",fontFamily:"monospace"}}>{e.employeeCode}</td><td style={{padding:"9px 12px",fontWeight:700}}>{e.claimCount}</td><td style={{padding:"9px 12px"}}><span style={{background:"#dcfce7",color:"#15803d",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>{e.approved}</span></td><td style={{padding:"9px 12px"}}><span style={{background:"#fef9c3",color:"#854d0e",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>{e.pending}</span></td><td style={{padding:"9px 12px",fontWeight:800,color:"#1e40af",fontSize:13}}>{fmt(e.totalAmount)}</td></tr>)}</tbody></table><div style={{padding:"8px 12px",borderTop:"1px solid #f1f5f9",background:"#f8fafc",borderRadius:"0 0 14px 14px"}}><span style={{fontSize:11,color:"#94a3b8"}}>{empRows.length} of {employees.length} employees</span></div></div>}
+      {view==="department"&&<div style={{background:"#fff",borderRadius:16,border:"1.5px solid #e2e8f0",overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}><thead><tr style={{background:"#f8fafc",borderBottom:"2px solid #e2e8f0"}}>{[["department","Department"],["requestCount","Requests"],["approved","Approved"],["pending","Pending"],["expenseTotal","Total Expenses"]].map(([k,l])=><th key={l} onClick={()=>tog(k)} style={{padding:"9px 12px",textAlign:"left",fontWeight:700,color:"#64748b",fontSize:11,textTransform:"uppercase",letterSpacing:"0.05em",cursor:"pointer",userSelect:"none"}}>{l}{arr(k)}</th>)}</tr></thead><tbody>{deptRows.length===0?<tr><td colSpan={5} style={{padding:"20px",textAlign:"center",color:"#94a3b8"}}>No data.</td></tr>:deptRows.map((d,i)=><tr key={d.department} style={{borderBottom:"1px solid #f8fafc"}} onMouseEnter={ev=>(ev.currentTarget.style.background="#f8fafc")} onMouseLeave={ev=>(ev.currentTarget.style.background="transparent")}><td style={{padding:"9px 12px"}}><div style={{display:"flex",alignItems:"center",gap:7}}><div style={{width:10,height:10,borderRadius:2,background:DC[i%DC.length],flexShrink:0}}/><strong style={{color:"#0f172a"}}>{d.department||"Unknown"}</strong></div></td><td style={{padding:"9px 12px",fontWeight:700}}>{d.requestCount}</td><td style={{padding:"9px 12px"}}><span style={{background:"#dcfce7",color:"#15803d",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>{d.approved}</span></td><td style={{padding:"9px 12px"}}><span style={{background:"#fef9c3",color:"#854d0e",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>{d.pending}</span></td><td style={{padding:"9px 12px",fontWeight:800,color:"#1e40af",fontSize:13}}>{fmt(d.expenseTotal)}</td></tr>)}</tbody></table><div style={{padding:"8px 12px",borderTop:"1px solid #f1f5f9",background:"#f8fafc",borderRadius:"0 0 14px 14px"}}><span style={{fontSize:11,color:"#94a3b8"}}>{deptRows.length} of {departments.length} departments</span></div></div>}
     </div>
-  );
+  </div>);
 }
 
-// ── Status breakdown charts ───────────────────────────────────────────────────
-function StatusCharts({ status }: { status: StatusStat }) {
-  const reqDonutRef = useRef<HTMLCanvasElement>(null);
-  const expDonutRef = useRef<HTMLCanvasElement>(null);
-  const expBarRef   = useRef<HTMLCanvasElement>(null);
-
-  const reqColors  = status.requests.map(r => STATUS_COLORS[r.status] ?? "#94a3b8");
-  const expColors  = status.expenses.map(e => STATUS_COLORS[e.status] ?? "#94a3b8");
-
-  const reqDonutConfig: ChartConfiguration = {
-    type: "doughnut",
-    data: {
-      labels: status.requests.map(r => r.status),
-      datasets: [{
-        data: status.requests.map(r => r.count),
-        backgroundColor: reqColors.map(c => c + "bb"),
-        borderColor:     reqColors,
-        borderWidth: 2,
-      }],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      cutout: "65%",
-      plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed} requests` } },
-      },
-    },
-  };
-
-  const expDonutConfig: ChartConfiguration = {
-    type: "doughnut",
-    data: {
-      labels: status.expenses.map(e => e.status),
-      datasets: [{
-        data: status.expenses.map(e => e.count),
-        backgroundColor: expColors.map(c => c + "bb"),
-        borderColor:     expColors,
-        borderWidth: 2,
-      }],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      cutout: "65%",
-      plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed} claims` } },
-      },
-    },
-  };
-
-  const expBarConfig: ChartConfiguration = {
-    type: "bar",
-    data: {
-      labels: status.expenses.map(e => e.status),
-      datasets: [{
-        label: "Total (₹)",
-        data: status.expenses.map(e => e.total),
-        backgroundColor: expColors.map(c => c + "33"),
-        borderColor:     expColors,
-        borderWidth: 2,
-        borderRadius: 6,
-      }],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: ctx => ` ${fmt(ctx.parsed.y as number)}` } },
-      },
-      scales: {
-        y: { beginAtZero: true, ticks: { callback: v => fmt(v as number) }, grid: { color: "#f1f5f9" } },
-        x: { grid: { display: false } },
-      },
-    },
-  };
-
-  useChart(reqDonutRef, reqDonutConfig);
-  useChart(expDonutRef, expDonutConfig);
-  useChart(expBarRef,   expBarConfig);
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      {/* Donut row */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
-        {/* Request donut */}
-        <div className={styles.card}>
-          <p className={styles.cardEyebrow}>Travel Request Status</p>
-          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 12 }}>
-            {status.requests.map(r => (
-              <div key={r.status} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#64748b" }}>
-                <div style={{ width: 10, height: 10, borderRadius: "50%", background: STATUS_COLORS[r.status] ?? "#94a3b8" }} />
-                {r.status}: <strong style={{ color: "#0f172a" }}>{r.count}</strong>
-              </div>
-            ))}
-          </div>
-          <div style={{ position: "relative", height: 200 }}>
-            <canvas ref={reqDonutRef}
-              role="img"
-              aria-label="Donut chart of travel requests by status">
-              {status.requests.map(r => `${r.status}: ${r.count}`).join(", ")}
-            </canvas>
-          </div>
-        </div>
-
-        {/* Expense count donut */}
-        <div className={styles.card}>
-          <p className={styles.cardEyebrow}>Expense Claims Status</p>
-          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 12 }}>
-            {status.expenses.map(e => (
-              <div key={e.status} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#64748b" }}>
-                <div style={{ width: 10, height: 10, borderRadius: "50%", background: STATUS_COLORS[e.status] ?? "#94a3b8" }} />
-                {e.status}: <strong style={{ color: "#0f172a" }}>{e.count}</strong>
-              </div>
-            ))}
-          </div>
-          <div style={{ position: "relative", height: 200 }}>
-            <canvas ref={expDonutRef}
-              role="img"
-              aria-label="Donut chart of expense claims by status">
-              {status.expenses.map(e => `${e.status}: ${e.count} claims`).join(", ")}
-            </canvas>
-          </div>
-        </div>
-      </div>
-
-      {/* Expense amount bar */}
-      <div className={styles.card}>
-        <p className={styles.cardEyebrow}>Expense Amount by Status (₹)</p>
-        <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 12 }}>
-          {status.expenses.map(e => (
-            <div key={e.status} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#64748b" }}>
-              <div style={{ width: 10, height: 10, borderRadius: 2, background: STATUS_COLORS[e.status] ?? "#94a3b8" }} />
-              {e.status}: <strong style={{ color: "#0f172a" }}>{fmt(e.total)}</strong>
-            </div>
-          ))}
-        </div>
-        <div style={{ position: "relative", height: 220 }}>
-          <canvas ref={expBarRef}
-            role="img"
-            aria-label="Bar chart of expense amounts by status">
-            {status.expenses.map(e => `${e.status}: ${fmt(e.total)}`).join(", ")}
-          </canvas>
-        </div>
-      </div>
-    </div>
-  );
+function AdminOverview({s}:{s:Summary}){
+  const r1=useRef<HTMLCanvasElement>(null),r2=useRef<HTMLCanvasElement>(null);
+  useChart(r1,{type:"bar",data:{labels:["Approved","Pending","Rejected"],datasets:[{label:"Requests",data:[s.approvedRequests,s.pendingRequests,s.rejectedRequests],backgroundColor:["#10b98122","#f59e0b22","#ef444422"],borderColor:["#10b981","#f59e0b","#ef4444"],borderWidth:2,borderRadius:8}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{stepSize:1},grid:{color:G}},x:{grid:{display:false}}}}});
+  useChart(r2,{type:"bar",data:{labels:["Total","Approved","Pending"],datasets:[{label:"₹",data:[s.totalExpenses,s.approvedExpenses,s.pendingExpenses],backgroundColor:["#3b82f622","#10b98122","#f59e0b22"],borderColor:["#3b82f6","#10b981","#f59e0b"],borderWidth:2,borderRadius:8}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>` ${fmt(ctx.parsed.y as number)}`}}},scales:{y:{beginAtZero:true,ticks:{callback:v=>fmt(v as number)},grid:{color:G}},x:{grid:{display:false}}}}});
+  const csv=[{Metric:"Total Requests",Value:s.totalRequests},{Metric:"Pending",Value:s.pendingRequests},{Metric:"Approved",Value:s.approvedRequests},{Metric:"Rejected",Value:s.rejectedRequests},{Metric:"Total Expenses",Value:s.totalExpenses},{Metric:"Pending Expenses",Value:s.pendingExpenses},{Metric:"Approved Expenses",Value:s.approvedExpenses},{Metric:"Active Employees",Value:s.totalEmployees}];
+  return(<div><div style={{display:"flex",justifyContent:"flex-end",marginBottom:10}}><ExBtn onCSV={()=>exportCSV(csv,"overview-kpis")} onPDF={()=>exportPDF("Overview Report","admin-overview")} label="Export:"/></div><div id="admin-overview" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:18,marginBottom:18}}>{[{ref:r1,title:"Requests by Status",lg:[{l:"Approved",c:"#10b981",v:String(s.approvedRequests)},{l:"Pending",c:"#f59e0b",v:String(s.pendingRequests)},{l:"Rejected",c:"#ef4444",v:String(s.rejectedRequests)}]},{ref:r2,title:"Expense Pipeline",lg:[{l:"Total",c:"#3b82f6",v:fmt(s.totalExpenses)},{l:"Approved",c:"#10b981",v:fmt(s.approvedExpenses)},{l:"Pending",c:"#f59e0b",v:fmt(s.pendingExpenses)}]}].map(card=>(<div key={card.title} style={{background:"#fff",borderRadius:16,padding:"18px 22px",border:"1.5px solid #e2e8f0",boxShadow:"0 2px 8px rgba(0,0,0,0.05)"}}><p style={{fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:7}}>{card.title}</p><div style={{display:"flex",gap:10,marginBottom:9,flexWrap:"wrap"}}>{card.lg.map(x=>(<div key={x.l} style={{display:"flex",alignItems:"center",gap:4,fontSize:12}}><div style={{width:9,height:9,borderRadius:2,background:x.c}}/><span style={{color:"#64748b"}}>{x.l}:</span><strong style={{color:"#0f172a"}}>{x.v}</strong></div>))}</div><div style={{height:200}}><canvas ref={card.ref}/></div></div>))}</div></div>);
 }
 
-// ── Page ──────────────────────────────────────────────────────────────────────
-export default function ReportsPage() {
-  const navigate    = useNavigate();
-  const { signOut } = useMsalLogin();
+export default function ReportsPage(){
+  const navigate=useNavigate();
+  const fullName=localStorage.getItem("full_name")??"Employee",role=localStorage.getItem("role")??"Employee";
+  const initials=fullName.trim().split(" ").filter(Boolean).map(p=>p[0]).slice(0,2).join("").toUpperCase()||"ME";
+  const isAdmin=["Admin","HR","admin","hr"].includes(role);
+  const[sum,setSum]=useState<Summary|null>(null),[tr,setTr]=useState<TransportStat[]>([]),[emp,setEmp]=useState<EmployeeStat[]>([]),[dept,setDept]=useState<DepartmentStat[]>([]),[loading,setLoading]=useState(true);
+  const[period,setPeriod]=useState<PeriodType>("monthly"),[cf,setCf]=useState(""),[ct,setCt]=useState(toISO(today));
+  const[empTab,setEmpTab]=useState<EmployeeTab>("overview"),[adminTab,setAdminTab]=useState<AdminTab>("overview");
+  const[rFrom,setRFrom]=useState(""),[rTo,setRTo]=useState("");
 
-  const fullName = localStorage.getItem("full_name") ?? "Employee";
-  const role     = localStorage.getItem("role")      ?? "Employee";
-  const initials = fullName.trim().split(" ").filter(Boolean)
-    .map(p => p[0]).slice(0, 2).join("").toUpperCase() || "ME";
-  const isAdminOrHr = role.toLowerCase() === "admin" || role.toLowerCase() === "hr";
+  const getRange=useCallback(()=>{if(period==="custom")return{from:cf,to:ct};return getPeriodDates(period);},[period,cf,ct]);
 
-  const [summary,   setSummary]   = useState<DashboardSummary | null>(null);
-  const [transport, setTransport] = useState<TransportStat[]>([]);
-  const [employees, setEmployees] = useState<EmployeeStat[]>([]);
-  const [status,    setStatus]    = useState<StatusStat | null>(null);
-  const [loading,   setLoading]   = useState(true);
-  const [activeTab, setActiveTab] = useState<TabId>("overview");
-
-  useEffect(() => {
+  const load=useCallback(async()=>{
     setLoading(true);
-    Promise.allSettled([
-      get<DashboardSummary>("/Report/dashboard"),
-      get<TransportStat[]>("/Report/by-transport"),
-      isAdminOrHr
-        ? get<EmployeeStat[]>("/Report/by-employee")
-        : Promise.resolve([] as EmployeeStat[]),
-      get<StatusStat>("/Report/by-status"),
-    ]).then(([sumRes, transRes, empRes, statRes]) => {
-      if (sumRes.status   === "fulfilled") setSummary(sumRes.value);
-      if (transRes.status === "fulfilled") setTransport(transRes.value);
-      if (empRes.status   === "fulfilled") setEmployees(empRes.value);
-      if (statRes.status  === "fulfilled") setStatus(statRes.value);
-    }).finally(() => setLoading(false));
-  }, [isAdminOrHr]);
+    const{from,to}=getRange();setRFrom(from);setRTo(to);
+    const qs=new URLSearchParams();if(from)qs.set("from",from);if(to)qs.set("to",to);
+    // FIX: employee uses scoped endpoint, admin uses all-employee endpoint; both pass date params
+    const trEp=isAdmin?`/Report/by-transport?${qs}`:`/Report/my-transport?${qs}`;
+    const results=await Promise.allSettled([get<Summary>(`/Report/dashboard?${qs}`),get<TransportStat[]>(trEp).catch(()=>[] as TransportStat[]),isAdmin?get<EmployeeStat[]>(`/Report/by-employee?${qs}`).catch(()=>[] as EmployeeStat[]):Promise.resolve([] as EmployeeStat[]),isAdmin?get<DepartmentStat[]>(`/Report/by-department?${qs}`).catch(()=>[] as DepartmentStat[]):Promise.resolve([] as DepartmentStat[])]);
+    if(results[0].status==="fulfilled")setSum(results[0].value);
+    if(results[1].status==="fulfilled")setTr(results[1].value);
+    if(results[2].status==="fulfilled")setEmp(results[2].value);
+    if(results[3].status==="fulfilled")setDept(results[3].value);
+    setLoading(false);
+  },[getRange,isAdmin]);
 
-  return (
-    <div className={styles.page}>
-      <CommonNavbar
-        user={{ initials, name: fullName, subtitle: role }}
-        onSignOut={async () => signOut()}
-        // No notificationBell prop here — bell only on dashboard
-      />
+  useEffect(()=>{void load();},[load]);
 
-      <main className={styles.main}>
-        {/* Hero */}
-        <div className={styles.hero}>
-          <div>
-            <p className={styles.heroEyebrow}>Analytics</p>
-            <h1 className={styles.heroTitle}>📊 Travel &amp; Expense Reports</h1>
-            <p className={styles.heroSub}>
-              {isAdminOrHr
-                ? "Organisation-wide overview of travel requests and expense claims."
-                : "Your personal travel and expense summary."}
-            </p>
-          </div>
-          <button className={styles.heroBack} onClick={() => navigate("/dashboard")}>← Dashboard</button>
-        </div>
+  const tb=(key:string,label:string,active:boolean,fn:()=>void)=>(<button key={key} onClick={fn} style={{padding:"7px 18px",borderRadius:10,border:"none",fontWeight:700,fontSize:12,cursor:"pointer",background:active?"#fff":"transparent",color:active?"#1e40af":"#64748b",boxShadow:active?"0 1px 6px rgba(0,0,0,0.1)":"none",transition:"all 0.15s"}}>{label}</button>);
+  const empKpiCsv=sum?[{Metric:"My Requests",Value:sum.totalRequests},{Metric:"Approved",Value:sum.approvedRequests},{Metric:"Pending",Value:sum.pendingRequests},{Metric:"Rejected",Value:sum.rejectedRequests},{Metric:"Total Expenses",Value:sum.totalExpenses},{Metric:"Approved Expenses",Value:sum.approvedExpenses},{Metric:"Pending Expenses",Value:sum.pendingExpenses}]:[];
 
-        {/* Tabs */}
-        <div className={styles.tabs}>
-          <TabBtn id="overview"  label="Overview"          activeTab={activeTab} onClick={() => setActiveTab("overview")}  />
-          <TabBtn id="transport" label="By Transport"      activeTab={activeTab} onClick={() => setActiveTab("transport")} />
-          {isAdminOrHr && <TabBtn id="employees" label="By Employee" activeTab={activeTab} onClick={() => setActiveTab("employees")} />}
-          <TabBtn id="status"    label="Status Breakdown"  activeTab={activeTab} onClick={() => setActiveTab("status")}   />
-        </div>
-
-        {loading ? (
-          <div className={styles.loading}>Loading reports…</div>
-        ) : (
-          <>
-            {/* ── OVERVIEW ── */}
-            {activeTab === "overview" && summary && (
-              <>
-                {/* Metric cards */}
-                <div className={styles.statGrid}>
-                  {([
-                    { label: "Total Requests",    value: summary.totalRequests,         icon: "✈️", color: "#3b82f6" },
-                    { label: "Pending",           value: summary.pendingRequests,        icon: "⏳", color: "#f59e0b" },
-                    { label: "Approved",          value: summary.approvedRequests,       icon: "✅", color: "#22c55e" },
-                    { label: "Rejected",          value: summary.rejectedRequests,       icon: "❌", color: "#ef4444" },
-                    { label: "Total Expenses",    value: fmt(summary.totalExpenses),     icon: "💰", color: "#8b5cf6" },
-                    { label: "Pending Expenses",  value: fmt(summary.pendingExpenses),   icon: "⏳", color: "#f59e0b" },
-                    { label: "Approved Expenses", value: fmt(summary.approvedExpenses),  icon: "✅", color: "#22c55e" },
-                    ...(isAdminOrHr ? [{ label: "Active Employees", value: summary.totalEmployees, icon: "👥", color: "#0ea5e9" }] : []),
-                  ] as { label: string; value: string | number; icon: string; color: string }[]).map(s => (
-                    <MetricCard key={s.label} {...s} />
-                  ))}
-                </div>
-
-                {/* Approval rate stacked bar */}
-                {summary.totalRequests > 0 && (
-                  <div className={styles.card}>
-                    <p className={styles.cardEyebrow}>Request Approval Rate</p>
-                    <div className={styles.rateBar}>
-                      {[
-                        { label: "Approved", count: summary.approvedRequests, color: "#22c55e" },
-                        { label: "Pending",  count: summary.pendingRequests,  color: "#f59e0b" },
-                        { label: "Rejected", count: summary.rejectedRequests, color: "#ef4444" },
-                      ].filter(s => s.count > 0).map(s => (
-                        <div key={s.label} className={styles.rateSegment}
-                          style={{ width: `${(s.count / summary.totalRequests) * 100}%`, background: s.color }}>
-                          {Math.round((s.count / summary.totalRequests) * 100)}%
-                        </div>
-                      ))}
-                    </div>
-                    <div className={styles.rateLegend}>
-                      {[{ label: "Approved", color: "#22c55e" }, { label: "Pending", color: "#f59e0b" }, { label: "Rejected", color: "#ef4444" }].map(l => (
-                        <div key={l.label} className={styles.rateLegendItem}>
-                          <div className={styles.rateDot} style={{ background: l.color }} />
-                          {l.label}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Chart.js bar charts */}
-                <OverviewCharts summary={summary} />
-              </>
-            )}
-
-            {/* ── BY TRANSPORT ── */}
-            {activeTab === "transport" && (
-              transport.length === 0 ? (
-                <div className={styles.card}><div className={styles.empty}>No transport data yet</div></div>
-              ) : (
-                <TransportCharts transport={transport} />
-              )
-            )}
-
-            {/* ── BY EMPLOYEE ── */}
-            {activeTab === "employees" && isAdminOrHr && (
-              <div className={styles.card}>
-                <p className={styles.cardEyebrow}>Top Expense Claimants</p>
-                {employees.length === 0 ? (
-                  <div className={styles.empty}>No expense data yet</div>
-                ) : (
-                  <div className={styles.tableWrap}>
-                    <table className={styles.table}>
-                      <thead>
-                        <tr>
-                          {["#", "Employee", "Code", "Claims", "Approved", "Pending", "Total"].map(h => (
-                            <th key={h}>{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {employees.map((emp, i) => (
-                          <tr key={emp.employeeCode}>
-                            <td><span className={styles.rankNum}>#{i + 1}</span></td>
-                            <td><span className={styles.empName}>{emp.displayName}</span></td>
-                            <td><span className={styles.empCode}>{emp.employeeCode}</span></td>
-                            <td>{emp.claimCount}</td>
-                            <td><span className={styles.badgeGreen}>{emp.approved}</span></td>
-                            <td><span className={styles.badgeAmber}>{emp.pending}</span></td>
-                            <td><span className={styles.totalAmt}>{fmt(emp.totalAmount)}</span></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-
-                {/* Employee bar chart */}
-                {employees.length > 0 && (
-                  <div style={{ marginTop: 24 }}>
-                    <p className={styles.cardEyebrow}>Employee Spend Comparison</p>
-                    <EmployeeBarChart employees={employees} />
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ── STATUS BREAKDOWN ── */}
-            {activeTab === "status" && status && (
-              <StatusCharts status={status} />
-            )}
-          </>
-        )}
-      </main>
-    </div>
-  );
-}
-
-// ── Employee bar chart ────────────────────────────────────────────────────────
-function EmployeeBarChart({ employees }: { employees: EmployeeStat[] }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const top10 = employees.slice(0, 10);
-  const config: ChartConfiguration = {
-    type: "bar",
-    data: {
-      labels: top10.map(e => e.displayName.split(" ")[0]),
-      datasets: [
-        {
-          label: "Approved",
-          data: top10.map(e => e.approved),
-          backgroundColor: "#22c55e33",
-          borderColor: "#22c55e",
-          borderWidth: 2,
-          borderRadius: 4,
-        },
-        {
-          label: "Pending",
-          data: top10.map(e => e.pending),
-          backgroundColor: "#f59e0b33",
-          borderColor: "#f59e0b",
-          borderWidth: 2,
-          borderRadius: 4,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: { mode: "index", intersect: false },
-      },
-      scales: {
-        y: { beginAtZero: true, ticks: { stepSize: 1 }, grid: { color: "#f1f5f9" } },
-        x: { grid: { display: false }, ticks: { autoSkip: false, maxRotation: 30 } },
-      },
-    },
-  };
-  useChart(canvasRef, config);
-  return (
-    <div>
-      <div style={{ display: "flex", gap: 14, marginBottom: 10 }}>
-        {[{ label: "Approved", color: "#22c55e" }, { label: "Pending", color: "#f59e0b" }].map(l => (
-          <div key={l.label} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#64748b" }}>
-            <div style={{ width: 10, height: 10, borderRadius: 2, background: l.color }} />
-            {l.label}
-          </div>
-        ))}
-      </div>
-      <div style={{ position: "relative", height: Math.max(220, top10.length * 32 + 60) }}>
-        <canvas ref={canvasRef}
-          role="img"
-          aria-label="Grouped bar chart of expense claims per employee">
-          {top10.map(e => `${e.displayName}: ${e.approved} approved, ${e.pending} pending`).join(". ")}
-        </canvas>
-      </div>
-    </div>
-  );
+  return(<div style={{minHeight:"100vh",background:"linear-gradient(160deg,#f0f4f8,#e8edf5)",fontFamily:FF}}>
+    <CommonNavbar showBack={true} onBack={()=>navigate("/dashboard")} user={{initials,name:fullName,subtitle:role}} onSignOut={async()=>signOutUser()}/>
+    <main style={{maxWidth:1200,margin:"0 auto",padding:"80px 24px 60px"}}>
+      <div style={{background:"linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%)",borderRadius:20,padding:"24px 28px",marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,boxShadow:"0 8px 32px rgba(15,23,42,0.28)"}}><div><p style={{fontSize:10,fontWeight:700,color:"rgba(255,255,255,0.4)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:5}}>Analytics</p><h1 style={{fontSize:22,fontWeight:900,color:"#fff",margin:0}}>📊 Travel & Expense Reports</h1><p style={{fontSize:12,color:"rgba(255,255,255,0.5)",marginTop:4}}>{isAdmin?"Organisation-wide intelligence":"Your personal travel summary"}</p></div><button onClick={()=>navigate("/dashboard")} style={{padding:"8px 16px",background:"rgba(255,255,255,0.08)",border:"1.5px solid rgba(255,255,255,0.18)",borderRadius:10,color:"#fff",fontWeight:600,fontSize:12,cursor:"pointer"}}>← Dashboard</button></div>
+      <PF period={period} setPeriod={setPeriod} cf={cf} scf={setCf} ct={ct} sct={setCt} onApply={()=>void load()}/>
+      <div style={{display:"flex",gap:3,marginBottom:20,background:"#e2e8f0",borderRadius:12,padding:3,width:"fit-content"}}>{isAdmin?[tb("overview","Overview",adminTab==="overview",()=>setAdminTab("overview")),tb("analytics","Analytics",adminTab==="analytics",()=>setAdminTab("analytics"))]:[tb("overview","Overview",empTab==="overview",()=>setEmpTab("overview")),tb("bymode","By Travel Mode",empTab==="bymode",()=>setEmpTab("bymode"))]}</div>
+      {loading?<div style={{textAlign:"center",padding:"60px 0",color:"#94a3b8"}}><div style={{fontSize:32,marginBottom:12}}>📊</div>Loading reports…</div>
+      :isAdmin?(
+        <>{adminTab==="overview"&&sum&&(<><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:12,marginBottom:18}}><KPI icon="✈️" label="Total Requests" value={sum.totalRequests} color="#3b82f6"/><KPI icon="⏳" label="Pending" value={sum.pendingRequests} color="#f59e0b"/><KPI icon="✅" label="Approved" value={sum.approvedRequests} color="#10b981"/><KPI icon="❌" label="Rejected" value={sum.rejectedRequests} color="#ef4444"/><KPI icon="💰" label="Total Expenses" value={fmt(sum.totalExpenses)} color="#8b5cf6"/><KPI icon="⏳" label="Pending Expenses" value={fmt(sum.pendingExpenses)} color="#f59e0b"/><KPI icon="✅" label="Approved Expenses" value={fmt(sum.approvedExpenses)} color="#10b981"/><KPI icon="👥" label="Active Employees" value={sum.totalEmployees} color="#0ea5e9"/></div><AdminOverview s={sum}/></>)}{adminTab==="analytics"&&<AdminAnalytics transport={tr} employees={emp} departments={dept} from={rFrom} to={rTo}/>}</>
+      ):(
+        <>{empTab==="overview"&&sum&&(<><div style={{display:"flex",justifyContent:"flex-end",marginBottom:10}}><ExBtn onCSV={()=>exportCSV(empKpiCsv,"my-overview")} onPDF={()=>exportPDF("My Travel Summary","emp-overview")} label="Export:"/></div><div id="emp-overview"><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(155px,1fr))",gap:12,marginBottom:18}}><KPI icon="✈️" label="My Requests" value={sum.totalRequests} color="#3b82f6"/><KPI icon="✅" label="Approved" value={sum.approvedRequests} color="#10b981"/><KPI icon="⏳" label="Pending" value={sum.pendingRequests} color="#f59e0b"/><KPI icon="❌" label="Rejected" value={sum.rejectedRequests} color="#ef4444"/><KPI icon="💰" label="Total Expenses" value={fmt(sum.totalExpenses)} color="#8b5cf6"/><KPI icon="✅" label="Approved Expenses" value={fmt(sum.approvedExpenses)} color="#10b981"/><KPI icon="⏳" label="Pending Expenses" value={fmt(sum.pendingExpenses)} color="#f59e0b"/></div>{sum.totalRequests>0&&<div style={{background:"#fff",borderRadius:16,padding:"18px 22px",border:"1.5px solid #e2e8f0",marginBottom:18}}><p style={{fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:9}}>Request Approval Rate</p><div style={{display:"flex",height:26,borderRadius:8,overflow:"hidden"}}>{[{l:"Approved",n:sum.approvedRequests,c:"#10b981"},{l:"Pending",n:sum.pendingRequests,c:"#f59e0b"},{l:"Rejected",n:sum.rejectedRequests,c:"#ef4444"}].filter(x=>x.n>0).map(x=>(<div key={x.l} style={{width:`${(x.n/sum.totalRequests)*100}%`,background:x.c,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:11,fontWeight:700,transition:"width 0.5s"}}>{Math.round((x.n/sum.totalRequests)*100)}%</div>))}</div><div style={{display:"flex",gap:12,marginTop:8}}>{[{l:"Approved",c:"#10b981"},{l:"Pending",c:"#f59e0b"},{l:"Rejected",c:"#ef4444"}].map(x=>(<div key={x.l} style={{display:"flex",alignItems:"center",gap:4,fontSize:12,color:"#64748b"}}><div style={{width:9,height:9,borderRadius:2,background:x.c}}/>{x.l}</div>))}</div></div>}</div></>)}{empTab==="bymode"&&(tr.length===0?<div style={{textAlign:"center",padding:"40px",color:"#94a3b8"}}>No travel mode data for this period.</div>:<ByTravelModeTab transport={tr} from={rFrom} to={rTo}/>)}</>
+      )}
+    </main>
+  </div>);
 }

@@ -48,6 +48,50 @@ public class ReportController : ControllerBase
         return Ok(data);
     }
 
+    // GET /api/Report/my-transport  — employee's own trips by mode
+    [HttpGet("my-transport")]
+    public async Task<IActionResult> MyTransport(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to)
+    {
+        // Extract EmployeeId from JWT — same pattern as BookingController
+        int empId = 0;
+        try
+        {
+            var authHeader = Request.Headers["Authorization"].FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(authHeader) && authHeader.StartsWith("Bearer "))
+            {
+                var jwt = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler()
+                            .ReadJwtToken(authHeader["Bearer ".Length..].Trim());
+                var val = jwt.Claims.FirstOrDefault(c => c.Type == "EmployeeId")?.Value;
+                int.TryParse(val, out empId);
+            }
+        }
+        catch { }
+
+        if (empId == 0)
+            return Unauthorized(new { message = "Invalid token — EmployeeId claim missing." });
+
+        var start = from ?? DateTime.UtcNow.AddYears(-5);
+        var end   = to   ?? DateTime.UtcNow;
+
+        var data = await _db.TravelRequests
+            .Where(r => r.EmployeeId == empId
+                    && r.CreatedAt  >= start
+                    && r.CreatedAt  <= end)
+            .GroupBy(r => r.TransportType)
+            .Select(g => new {
+                Transport   = g.Key,
+                Count       = g.Count(),
+                TotalAmount = g.Sum(r => r.EstimatedAmount ?? 0),
+            })
+            .OrderByDescending(x => x.Count)
+            .ToListAsync();
+
+        return Ok(data);
+    }
+
+
     // GET /api/Report/by-employee
     [HttpGet("by-employee")]
     public async Task<IActionResult> ByEmployee([FromQuery] DateTime? from, [FromQuery] DateTime? to)
@@ -87,4 +131,36 @@ public class ReportController : ControllerBase
 
         return Ok(new { requests, expenses });
     }
+
+    /// <summary>Returns request and expense breakdown grouped by employee department.</summary>
+    [HttpGet("by-department")]
+    public async Task<IActionResult> ByDepartment(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to)
+    {
+        var fromDate = from ?? DateTime.UtcNow.AddYears(-1);
+        var toDate   = to   ?? DateTime.UtcNow;
+
+        var requests = await _db.TravelRequests
+            .Include(r => r.Employee)
+            .Include(r => r.ExpenseClaims)
+            .Where(r => r.CreatedAt >= fromDate && r.CreatedAt <= toDate)
+            .ToListAsync();
+
+        var grouped = requests
+            .GroupBy(r => r.Employee?.Department ?? "Unknown")
+            .Select(g => new
+            {
+                Department    = g.Key,
+                RequestCount  = g.Count(),
+                Approved      = g.Count(r => r.Status == "Approved"),
+                Pending       = g.Count(r => r.Status == "Submitted" || r.Status == "UnderReview"),
+                ExpenseTotal  = g.SelectMany(r => r.ExpenseClaims).Sum(e => e.Amount),
+            })
+            .OrderByDescending(g => g.RequestCount)
+            .ToList();
+
+        return Ok(grouped);
+    }
+
 }

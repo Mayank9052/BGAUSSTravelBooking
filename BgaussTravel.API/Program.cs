@@ -1,16 +1,22 @@
+// BgaussTravel.API/Program.cs
+// ADDED: explicit MIME type mappings for images and PDFs served from /uploads
+// This fixes "unsupported format" when clicking download on IIS.
+
 using System.Text;
 using BgaussTravel.API.Data;
 using BgaussTravel.API.Hubs;
 using BgaussTravel.API.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ── DATABASE ─────────────────────────────────────────────
+// ── Database ──────────────────────────────────────────────────────────────────
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(
         builder.Configuration.GetConnectionString("DefaultConnection"),
@@ -41,7 +47,7 @@ builder.Services.AddCors(opt => opt.AddDefaultPolicy(p =>
 
 // ── JWT AUTH ───────────────────────────────────────────
 var jwtKey = builder.Configuration["Jwt:Key"]
-    ?? throw new InvalidOperationException("Jwt:Key is missing");
+    ?? throw new InvalidOperationException("Jwt:Key is missing from appsettings.json");
 
 var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "BgaussTravel";
 
@@ -49,85 +55,89 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
         options.MapInboundClaims = false;
-
         options.TokenValidationParameters = new TokenValidationParameters
         {
-            ValidateIssuer = true,
-            ValidateAudience = true,
-            ValidateLifetime = true,
+            ValidateIssuer           = true,
+            ValidateAudience         = true,
+            ValidateLifetime         = true,
             ValidateIssuerSigningKey = true,
-            ValidIssuer = jwtIssuer,
-            ValidAudience = jwtIssuer,
-            IssuerSigningKey = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(jwtKey)
-            ),
-            NameClaimType = "name",
-            RoleClaimType = "Role",
-        };
-
-        // ✅ REQUIRED FOR SIGNALR (VERY IMPORTANT)
-        options.Events = new JwtBearerEvents
-        {
-            OnMessageReceived = context =>
-            {
-                var accessToken = context.Request.Query["access_token"];
-                var path = context.HttpContext.Request.Path;
-
-                if (!string.IsNullOrEmpty(accessToken) &&
-                    path.StartsWithSegments("/hubs"))
-                {
-                    context.Token = accessToken;
-                }
-
-                return Task.CompletedTask;
-            }
+            ValidIssuer              = jwtIssuer,
+            ValidAudience            = jwtIssuer,
+            IssuerSigningKey         = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+            NameClaimType            = "name",
+            RoleClaimType            = "Role",
         };
     });
 
 builder.Services.AddAuthorization();
-
-// ── CONTROLLERS ────────────────────────────────────────
 builder.Services.AddControllers();
 
-// ── SWAGGER ───────────────────────────────────────────
+// ── SWAGGER ───────────────────────────────────────────────────────────────────
 builder.Services.AddEndpointsApiExplorer();
-
 builder.Services.AddSwaggerGen(options =>
 {
-    options.SwaggerDoc("v1", new OpenApiInfo
+    options.SwaggerDoc("v1", new OpenApiInfo { Title = "BGauss Travel API", Version = "v1" });
+    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
-        Title = "BGauss Travel API",
-        Version = "v1"
+        Name = "Authorization", Type = SecuritySchemeType.Http,
+        Scheme = "bearer", BearerFormat = "JWT", In = ParameterLocation.Header,
+        Description = "Enter: Bearer {your token}"
     });
+    options.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {{
+        new OpenApiSecurityScheme { Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" } },
+        new string[] {}
+    }});
 });
 
 var app = builder.Build();
 
-// 🔥 CRITICAL FIX FOR IIS (DON’T REMOVE)
-app.UseForwardedHeaders(new ForwardedHeadersOptions
+// ── PIPELINE ─────────────────────────────────────────────────────────────────
+if (app.Environment.IsDevelopment())
 {
-    ForwardedHeaders = ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedFor
-});
-
-
-// ✅ ENABLE SWAGGER ALWAYS (for debugging server)
-app.UseSwagger();
-app.UseSwaggerUI(c =>
-{
-    c.SwaggerEndpoint("/swagger/v1/swagger.json", "BGauss Travel API v1");
-    c.RoutePrefix = "swagger";
-});
-
-
+    app.UseSwagger();
+    app.UseSwaggerUI(c =>
+    {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "BGauss Travel API v1");
+        c.RoutePrefix = "swagger";
+    });
+}
 // ❌ DO NOT USE THIS IN IIS (causes your HTTPS errors)
 // app.UseHttpsRedirection();
 
-
-app.UseStaticFiles();
-
-app.UseRouting();   // ✅ MUST BE BEFORE CORS
-
 app.UseCors();
+
+// ── STATIC FILES with explicit MIME types ─────────────────────────────────────
+// This fixes "unsupported format" downloads — IIS needs explicit MIME mappings.
+var contentTypeProvider = new FileExtensionContentTypeProvider();
+contentTypeProvider.Mappings[".png"]   = "image/png";
+contentTypeProvider.Mappings[".jpg"]   = "image/jpeg";
+contentTypeProvider.Mappings[".jpeg"]  = "image/jpeg";
+contentTypeProvider.Mappings[".webp"]  = "image/webp";
+contentTypeProvider.Mappings[".pdf"]   = "application/pdf";
+contentTypeProvider.Mappings[".svg"]   = "image/svg+xml";
+contentTypeProvider.Mappings[".woff"]  = "font/woff";
+contentTypeProvider.Mappings[".woff2"] = "font/woff2";
+
+// Serve wwwroot (React build + uploads folder)
+app.UseStaticFiles(new StaticFileOptions
+{
+    ContentTypeProvider = contentTypeProvider,
+});
+
+// ── EXPLICIT /uploads path (belt-and-suspenders for IIS) ─────────────────────
+// Even if /uploads is inside wwwroot, this ensures the MIME types are correct
+// when IIS intercepts the request before ASP.NET Core does.
+var uploadsPath = Path.Combine(app.Environment.ContentRootPath, "wwwroot", "uploads");
+if (Directory.Exists(uploadsPath))
+{
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        FileProvider        = new PhysicalFileProvider(uploadsPath),
+        RequestPath         = "/uploads",
+        ContentTypeProvider = contentTypeProvider,
+    });
+}
 
 app.UseAuthentication();
 app.UseAuthorization();

@@ -27,6 +27,89 @@ import type { HubConnection } from "@microsoft/signalr";
 import { HubConnectionState } from "@microsoft/signalr";
 import styles from "./DashboardPage.module.css";
 
+export function useCurrentCity(): string {
+  const [city, setCity] = useState<string>(
+    // Use cached value immediately so it shows on first render
+    () => localStorage.getItem("user_city") ?? ""
+  );
+
+  useEffect(() => {
+    // Already have a cached city — show it, don't re-fetch this session
+    if (localStorage.getItem("user_city")) return;
+
+    let cancelled = false;
+
+    const saveCity = (name: string) => {
+      if (cancelled || !name.trim()) return;
+      setCity(name);
+      localStorage.setItem("user_city", name);
+    };
+
+    // ── Fallback: IP geolocation (always works, including HTTP) ──────────────
+    const tryIP = async (): Promise<void> => {
+      try {
+        const res = await fetch("https://ipapi.co/json/", {
+          headers: { Accept: "application/json" },
+        });
+        if (!res.ok) return;
+        const d = await res.json() as {
+          city?: string; region?: string; country_name?: string;
+          error?: boolean; reason?: string;
+        };
+        if (d.error || !d.city) return;
+        saveCity(d.city);
+      } catch { /* silent */ }
+    };
+
+    // ── Primary: GPS + Nominatim (works on HTTPS / localhost) ────────────────
+    const tryGPS = (): boolean => {
+      const isSecure = window.isSecureContext || window.location.hostname === "localhost";
+      if (!isSecure || !navigator.geolocation) return false;
+
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          if (cancelled) return;
+          const { latitude, longitude } = pos.coords;
+          try {
+            const res = await fetch(
+              `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json&zoom=10&addressdetails=1`,
+              { headers: { "Accept-Language": "en", "User-Agent": "BGauss-Travel/1.0" } }
+            );
+            if (!res.ok) throw new Error("Nominatim error");
+            const data = await res.json() as {
+              address?: {
+                city?: string; town?: string; village?: string;
+                county?: string; state?: string;
+              };
+            };
+            const addr = data.address;
+            const name = addr?.city ?? addr?.town ?? addr?.village ?? addr?.county ?? addr?.state ?? "";
+            if (name) { saveCity(name); return; }
+            // Nominatim returned no city → fallback to IP
+            void tryIP();
+          } catch {
+            // Nominatim failed → fallback to IP
+            void tryIP();
+          }
+        },
+        () => {
+          // GPS denied or unavailable → try IP
+          void tryIP();
+        },
+        { enableHighAccuracy: false, timeout: 6000, maximumAge: 300000 }
+      );
+      return true;
+    };
+
+    // Start: GPS first, IP as fallback
+    if (!tryGPS()) void tryIP();
+
+    return () => { cancelled = true; };
+  }, []);
+
+  return city;
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const TRANSPORT_ICONS: Record<string, string> = {
@@ -68,37 +151,129 @@ const fmtTime = (d: string | null | undefined) => {
   catch { return ""; }
 };
 
+// Helper: resolve bill URL correctly in both dev and production
+function resolveBillUrl(billPath: string | null): string | null {
+  if (!billPath) return null;
+  if (billPath.startsWith("http")) return billPath;
+  return billPath;
+}
+
+// Blob download: works for both same-origin AND cross-origin
+async function downloadBill(url: string, filename: string) {
+  try {
+    const token = localStorage.getItem("jwt_token") ?? "";
+    const res = await fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(blobUrl);
+  } catch (err) {
+    alert(`Download failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+
 // ── Bill Cell ─────────────────────────────────────────────────────────────────
 function BillCell({ billPath, billFileName }: { billPath: string | null; billFileName: string | null }) {
-  const [hovered, setHovered] = useState(false);
+  const [hovered,  setHovered]  = useState(false);
   const [imgError, setImgError] = useState(false);
-  if (!billPath) return <span style={{ fontSize: 11, color: "#f59e0b", fontWeight: 600 }}>⚠ No bill</span>;
-  const isImage = /\.(jpg|jpeg|png|webp)$/i.test(billPath) && !imgError;
-  const isPdf   = /\.pdf$/i.test(billPath);
-  const label   = billFileName
-    ? billFileName.length > 16 ? billFileName.slice(0, 16) + "…" : billFileName
-    : "View Bill";
-  const fullUrl = billPath.startsWith("https") ? billPath : `${window.location.origin}${billPath}`;
+  const [downloading, setDownloading] = useState(false);
+
+  if (!billPath) {
+    return <span style={{ fontSize: 11, color: "#f59e0b", fontWeight: 600 }}>⚠ No bill</span>;
+  }
+
+  const resolvedUrl = resolveBillUrl(billPath)!;
+  const isImage     = /\.(jpg|jpeg|png|webp)$/i.test(billPath) && !imgError;
+  const isPdf       = /\.pdf$/i.test(billPath);
+  const label       = billFileName
+    ? (billFileName.length > 18 ? billFileName.slice(0, 18) + "…" : billFileName)
+    : (isPdf ? "View PDF" : "View Bill");
+
+  const handleDownload = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDownloading(true);
+    await downloadBill(resolvedUrl, billFileName ?? (isPdf ? "bill.pdf" : "bill.png"));
+    setDownloading(false);
+  };
+
   return (
     <div style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 6 }}>
-      <a href={fullUrl} target="_blank" rel="noreferrer"
-        onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
-        style={{ fontSize: 11, color: "#3b82f6", fontWeight: 600, textDecoration: "none", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 4 }}>
-        📎 {label}
+
+      {/* ── Open in new tab ── */}
+      <a
+        href={resolvedUrl}
+        target="_blank"
+        rel="noreferrer"
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        style={{
+          fontSize: 11, color: "#3b82f6", fontWeight: 600,
+          textDecoration: "none", whiteSpace: "nowrap",
+          display: "inline-flex", alignItems: "center", gap: 4,
+        }}>
+        {isPdf ? "📄" : "🖼️"} {label}
       </a>
-      <a href={fullUrl} download={billFileName ?? "bill"} title="Download"
-        style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: 6, background: "#f1f5f9", border: "1px solid #e2e8f0", color: "#64748b", textDecoration: "none", fontSize: 13, flexShrink: 0 }}
-        onMouseEnter={e => (e.currentTarget.style.background = "#dbeafe")}
-        onMouseLeave={e => (e.currentTarget.style.background = "#f1f5f9")}>⬇</a>
+
+      {/* ── Download button (blob fetch — always works) ── */}
+      <button
+        onClick={e => void handleDownload(e)}
+        disabled={downloading}
+        title={downloading ? "Downloading…" : "Download"}
+        style={{
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
+          width: 24, height: 24, borderRadius: 6,
+          background: downloading ? "#bfdbfe" : "#f1f5f9",
+          border: "1px solid #e2e8f0",
+          color: downloading ? "#3b82f6" : "#64748b",
+          cursor: downloading ? "not-allowed" : "pointer",
+          fontSize: 13, flexShrink: 0,
+        }}
+        onMouseEnter={e => { if (!downloading) e.currentTarget.style.background = "#dbeafe"; }}
+        onMouseLeave={e => { if (!downloading) e.currentTarget.style.background = "#f1f5f9"; }}>
+        {downloading ? "…" : "⬇"}
+      </button>
+
+      {/* ── Image preview tooltip ── */}
       {hovered && isImage && (
-        <div style={{ position: "absolute", bottom: "calc(100% + 10px)", left: "50%", transform: "translateX(-50%)", zIndex: 9999, background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: 12, boxShadow: "0 12px 40px rgba(0,0,0,0.18)", padding: 8, pointerEvents: "none", width: 200 }}>
-          <img src={fullUrl} alt={billFileName ?? "Bill"} onError={() => setImgError(true)}
-            style={{ width: "100%", height: 160, objectFit: "cover", borderRadius: 8 }} />
+        <div style={{
+          position: "absolute", bottom: "calc(100% + 10px)", left: "50%",
+          transform: "translateX(-50%)", zIndex: 9999,
+          background: "#fff", border: "1.5px solid #e2e8f0",
+          borderRadius: 12, boxShadow: "0 12px 40px rgba(0,0,0,0.18)",
+          padding: 8, pointerEvents: "none", width: 200,
+        }}>
+          <img
+            src={resolvedUrl}
+            alt={billFileName ?? "Bill preview"}
+            onError={() => setImgError(true)}
+            style={{ width: "100%", height: 160, objectFit: "cover", borderRadius: 8 }}
+          />
+          <div style={{ fontSize: 10, color: "#64748b", marginTop: 6, textAlign: "center", fontWeight: 600 }}>
+            Click to open full size
+          </div>
         </div>
       )}
+
+      {/* ── PDF tooltip ── */}
       {hovered && (isPdf || imgError) && (
-        <div style={{ position: "absolute", bottom: "calc(100% + 10px)", left: "50%", transform: "translateX(-50%)", zIndex: 9999, background: "#0f172a", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", pointerEvents: "none" }}>
-          📄 {billFileName ?? "Document"} — click to open
+        <div style={{
+          position: "absolute", bottom: "calc(100% + 10px)", left: "50%",
+          transform: "translateX(-50%)", zIndex: 9999,
+          background: "#0f172a", color: "#fff", borderRadius: 8,
+          padding: "6px 12px", fontSize: 11, fontWeight: 600,
+          whiteSpace: "nowrap", pointerEvents: "none",
+        }}>
+          {isPdf ? "📄" : "🖼️"} {billFileName ?? "Document"} — click to open
         </div>
       )}
     </div>
@@ -523,6 +698,7 @@ export default function DashboardPage() {
 
   const normalizedRole = role.toLowerCase();
   const isAdminOrHr    = normalizedRole === "admin" || normalizedRole === "hr";
+  const currentCity = useCurrentCity();
 
   // ── State ─────────────────────────────────────────────────────────────────
   const [trips,           setTrips]           = useState<TravelRequestResponse[]>([]);
@@ -878,6 +1054,7 @@ export default function DashboardPage() {
     <div className={styles.page}>
       <CommonNavbar
         navItems={navItems}
+        locationDisplay={currentCity || undefined}
         user={{ initials, name: fullName, subtitle: role }}
         onSignOut={async () => signOut()}
         notificationBell={notificationBellProp}
