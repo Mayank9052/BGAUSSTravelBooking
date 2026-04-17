@@ -1,7 +1,10 @@
 // src/components/layout/CommonNavbar.tsx
-// allNotifications is now passed through to NotificationTabs for the History tab
+// ADDED:
+//  1. showBack prop — shows a ← Back button at start of navbar (all pages except Dashboard)
+//  2. locationDisplay — shows current city near the user avatar (Dashboard page only)
+//  3. onBack callback (defaults to browser history back)
 
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import styles from "./CommonNavbar.module.css";
 import { NotificationTabs } from "./NotificationTabs";
 
@@ -14,8 +17,8 @@ export interface NotificationItem {
 }
 
 export interface NotificationBellProps {
-  notifications:     NotificationItem[];   // unread only  → Fresh tab
-  allNotifications?: NotificationItem[];   // all notifs   → History tab
+  notifications:     NotificationItem[];
+  allNotifications?: NotificationItem[];
   unreadCount:       number;
   showDrop:          boolean;
   onToggle:          () => void;
@@ -26,9 +29,9 @@ export interface NotificationBellProps {
 }
 
 interface NavItem {
-  id: string;
-  label: string;
-  active?: boolean;
+  id:       string;
+  label:    string;
+  active?:  boolean;
   onClick?: () => void;
 }
 
@@ -40,16 +43,27 @@ interface NavUser {
 
 interface CommonNavbarProps {
   navItems?:         NavItem[];
+  /** City/location string to show near avatar (Dashboard only) */
+  locationDisplay?:  string;
   user?:             NavUser;
   onSignOut?:        () => void;
   notificationBell?: NotificationBellProps;
+  /** Show ← Back button at the left of navbar. Set to false on Dashboard. Default: true */
+  showBack?:         boolean;
+  /** Called when back button is clicked. Defaults to history.back() */
+  onBack?:           () => void;
+  
 }
 
 export default function CommonNavbar({
   navItems = [],
+  locationDisplay,
   user,
   onSignOut,
   notificationBell,
+  showBack = false,
+  onBack,
+  
 }: CommonNavbarProps) {
   const dropRef = useRef<HTMLDivElement>(null);
 
@@ -63,8 +77,31 @@ export default function CommonNavbar({
     return () => { clearTimeout(t); document.removeEventListener("mousedown", close); };
   }, [notificationBell?.showDrop]);
 
+  const handleBack = () => {
+    if (onBack) onBack();
+    else window.history.back();
+  };
+
   return (
     <header className={styles.navbar}>
+
+      {/* ── Back button (shown on all non-dashboard pages) ── */}
+      {showBack && (
+        <button
+          type="button"
+          onClick={handleBack}
+          style={{
+            display: "flex", alignItems: "center", gap: 6,
+            background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.14)",
+            borderRadius: 8, padding: "6px 12px", cursor: "pointer",
+            color: "rgba(255,255,255,0.85)", fontSize: 13, fontWeight: 600,
+            flexShrink: 0, transition: "background 0.15s", fontFamily: "inherit",
+          }}
+          onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.14)")}
+          onMouseLeave={e => (e.currentTarget.style.background = "rgba(255,255,255,0.08)")}>
+          ← Back
+        </button>
+      )}
 
       {/* Brand */}
       <div className={styles.brand}>
@@ -91,6 +128,18 @@ export default function CommonNavbar({
       {/* Right actions */}
       <div className={styles.actions}>
 
+        {/* Location display — shown on Dashboard only */}
+        {locationDisplay && (
+          <div style={{
+            fontSize: 10, color: "rgba(255,255,255,0.5)", fontWeight: 500,
+            display: "flex", alignItems: "center", gap: 3, marginTop: 2,
+            paddingRight: 2,
+          }}>
+            <span style={{ fontSize: 10 }}>📍</span>
+            {locationDisplay}
+          </div>
+        )}
+
         {/* ── Notification bell ── */}
         {notificationBell && (
           <div ref={dropRef} style={{ position: "relative" }}>
@@ -113,15 +162,13 @@ export default function CommonNavbar({
                   minWidth: 15, height: 15, background: "#D83B34",
                   borderRadius: "50%", fontSize: 9, fontWeight: 700,
                   color: "#fff", display: "flex", alignItems: "center",
-                  justifyContent: "center", border: "1.5px solid #0b1120",
-                  padding: "0 2px",
+                  justifyContent: "center", border: "1.5px solid #0b1120", padding: "0 2px",
                 }}>
                   {notificationBell.unreadCount > 9 ? "9+" : notificationBell.unreadCount}
                 </span>
               )}
             </button>
 
-            {/* Dropdown */}
             {notificationBell.showDrop && (
               <div style={{
                 position: "absolute", top: "calc(100% + 8px)", right: 0,
@@ -130,20 +177,16 @@ export default function CommonNavbar({
                 boxShadow: "0 16px 48px rgba(0,0,0,0.16)",
                 zIndex: 999, overflow: "hidden",
               }}>
-                {/* Header row */}
                 <div style={{
                   padding: "14px 16px 10px", borderBottom: "1px solid #f1f5f9",
                   display: "flex", justifyContent: "space-between", alignItems: "center",
                 }}>
-                  <span style={{ fontWeight: 800, fontSize: 14, color: "#0f172a" }}>
-                    🔔 Notifications
-                  </span>
+                  <span style={{ fontWeight: 800, fontSize: 14, color: "#0f172a" }}>🔔 Notifications</span>
                   <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                     {notificationBell.unreadCount > 0 && (
                       <button onClick={notificationBell.onMarkAllRead}
                         style={{ fontSize: 11, color: "#3b82f6", background: "none",
-                          border: "none", cursor: "pointer", fontWeight: 700, padding: 0,
-                          fontFamily: "inherit" }}>
+                          border: "none", cursor: "pointer", fontWeight: 700, padding: 0, fontFamily: "inherit" }}>
                         Mark all read
                       </button>
                     )}
@@ -154,8 +197,6 @@ export default function CommonNavbar({
                     </button>
                   </div>
                 </div>
-
-                {/* Tabs with Fresh + History */}
                 <NotificationTabs
                   notifications={notificationBell.notifications}
                   allNotifications={notificationBell.allNotifications ?? notificationBell.notifications}
@@ -167,14 +208,18 @@ export default function CommonNavbar({
           </div>
         )}
 
-        {/* User pill */}
+
+        {/* ── User pill + optional location ── */}
         {user && (
-          <div className={styles.userPill}>
-            <div className={styles.avatar}>{user.initials}</div>
-            <div className={styles.userInfo}>
-              <span className={styles.userName}>{user.name}</span>
-              <span className={styles.userRole}>{user.subtitle}</span>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 0 }}>
+            <div className={styles.userPill}>
+              <div className={styles.avatar}>{user.initials}</div>
+              <div className={styles.userInfo}>
+                <span className={styles.userName}>{user.name}</span>
+                <span className={styles.userRole}>{user.subtitle}</span>
+              </div>
             </div>
+            
           </div>
         )}
 

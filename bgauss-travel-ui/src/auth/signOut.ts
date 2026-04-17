@@ -7,11 +7,12 @@ import { msalInstance } from "./msalConfig";
 
 const APP_SESSION_KEYS = [
   "jwt_token", "employee_id", "full_name", "email", "role",
-  "employee_code", "department", "designation", "reporting_manager", "contact_number",
+  "employee_code", "department", "designation", "reporting_manager", "contact_number","user_city", "login_time",
 ] as const;
 
 export function signOutUser(): void {
   APP_SESSION_KEYS.forEach((key) => localStorage.removeItem(key));
+  localStorage.removeItem("user_city"); // added
   msalInstance.setActiveAccount(null);
   window.location.replace("/login");
 }

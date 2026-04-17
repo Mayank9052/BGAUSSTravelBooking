@@ -1,7 +1,6 @@
 // vite.config.ts
-// Proxy is ONLY used during local dev (npm run dev).
-// In production (npm run build), Vite removes all proxy config —
-// the built JS files use relative /api paths, which IIS handles directly.
+// Added /uploads proxy so bill images/PDFs load correctly in dev (localhost:5173)
+// In production (IIS) everything is on the same origin so no proxy needed.
 
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
@@ -13,8 +12,6 @@ export default defineConfig({
     port: 5173,
     open: true,
     proxy: {
-      // Dev only: forwards /api to the .NET dev server
-      // In production this block is irrelevant — it's never included in the build
       '/api': {
         target:       'https://localhost:7136',   // ← updated to match actual backend port
         changeOrigin: true,
@@ -27,6 +24,14 @@ export default defineConfig({
         changeOrigin: true,
         secure:       false,  // Accept self-signed cert in dev
         ws:           true,
+      },
+      // ── KEY FIX: proxy /uploads so bill images load in dev ────────────────
+      // Without this, Vite serves /uploads from its own static folder (not found).
+      // With this, /uploads/bills/uuid.png → http://localhost:5136/uploads/bills/...
+      '/uploads': {
+        target:       'https://localhost:7136',
+        changeOrigin: true,
+        secure:       false,
       },
     },
   },

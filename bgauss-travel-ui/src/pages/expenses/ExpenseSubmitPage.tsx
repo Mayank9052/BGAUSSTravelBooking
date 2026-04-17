@@ -248,6 +248,7 @@ export default function ExpenseSubmitPage() {
     return (
       <div className={styles.page}>
         <CommonNavbar
+          showBack={true} onBack={() => navigate("/dashboard")}
           user={{ initials, name: fullName, subtitle: role }}
           onSignOut={async () => signOut()}
         />
@@ -367,6 +368,7 @@ export default function ExpenseSubmitPage() {
   return (
     <div className={styles.page}>
       <CommonNavbar
+        showBack={true} onBack={() => navigate("/dashboard")}
         user={{ initials, name: fullName, subtitle: role }}
         onSignOut={async () => signOut()}
       />
