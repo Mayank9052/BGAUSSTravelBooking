@@ -152,6 +152,7 @@ public partial class AppDbContext : DbContext
             entity.HasIndex(e => e.RequestCode, "UQ__TravelRe__CBAB82F65368D772").IsUnique();
 
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getutcdate())");
+            entity.Property(e => e.Department).HasMaxLength(100);
             entity.Property(e => e.Destination).HasMaxLength(256);
             entity.Property(e => e.EstimatedAmount).HasColumnType("decimal(12, 2)");
             entity.Property(e => e.OriginAddress).HasMaxLength(500);
