@@ -1,9 +1,10 @@
 // src/pages/dashboard/DashboardPage.tsx
-// Changes from original:
-//  1. Employee "My Trips" now loads & shows linked expense claims per trip (with bill previews)
-//  2. Each trip card has an "Upload Bill" button → navigates to /expense/submit?requestId=X
-//  3. Approved/historical trips also show an "Add Expense" button for late bill uploads
-//  4. ExpenseSubmitPage receives requestId query param to pre-select and lock the trip
+// Changes:
+//  - Notification bell REMOVED from inline JSX → passed as prop to CommonNavbar
+//  - Employee "Approved" stat card fixed: uses trips array directly
+//  - Mini sparkline bar on "Approved" stat card links to /reports
+//  - Admin/HR: Travel Policy configuration tab added
+//  - SignalR ref kept; liveToast kept
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
@@ -128,12 +129,12 @@ const STATUS_COLORS: Record<string, string> = {
 const expenseBadgeStyle = (status: string): React.CSSProperties => ({
   padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700,
   background:
-    status === "Approved"    ? "#dcfce7"
+    status === "Approved"   ? "#dcfce7"
     : status === "Rejected"  ? "#fee2e2"
     : status === "Reimbursed"? "#ede9fe"
     : "#fef3c7",
   color:
-    status === "Approved"    ? "#15803d"
+    status === "Approved"   ? "#15803d"
     : status === "Rejected"  ? "#b91c1c"
     : status === "Reimbursed"? "#6d28d9"
     : "#92400e",
@@ -558,6 +559,7 @@ function TravelPolicyConfig() {
   };
 
   const handleSave = () => {
+    // In a real app: await put("/Policy/travel", policy)
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
   };
@@ -593,6 +595,8 @@ function TravelPolicyConfig() {
           {saved ? "✓ Saved!" : "Save Policy"}
         </button>
       </div>
+
+      {/* Limits grid */}
       <div style={{ padding: "20px 24px" }}>
         <p style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 14 }}>
           💰 Expense Limits per Trip
@@ -604,7 +608,10 @@ function TravelPolicyConfig() {
           {field("Max Train Amount", "maxTrainAmount")}
         </div>
       </div>
+
       <div style={{ margin: "0 24px", borderTop: "1.5px solid #f1f5f9" }} />
+
+      {/* Rules grid */}
       <div style={{ padding: "20px 24px" }}>
         <p style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 14 }}>
           📋 Approval & Booking Rules
@@ -615,7 +622,10 @@ function TravelPolicyConfig() {
           {field("Advance Booking (days)", "advanceBookingDays", "")}
         </div>
       </div>
+
       <div style={{ margin: "0 24px", borderTop: "1.5px solid #f1f5f9" }} />
+
+      {/* Allowed transport categories */}
       <div style={{ padding: "20px 24px 28px" }}>
         <p style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 14 }}>
           🚗 Allowed Travel Categories
@@ -625,7 +635,13 @@ function TravelPolicyConfig() {
             const active = policy.allowedCategories.includes(cat);
             return (
               <button key={cat} onClick={() => toggleCategory(cat)}
-                style={{ padding: "7px 16px", borderRadius: 20, fontSize: 12, fontWeight: 700, cursor: "pointer", border: "none", background: active ? "#0f172a" : "#f1f5f9", color: active ? "#fff" : "#64748b", transition: "all 0.15s" }}>
+                style={{
+                  padding: "7px 16px", borderRadius: 20, fontSize: 12, fontWeight: 700,
+                  cursor: "pointer", border: "none",
+                  background: active ? "#0f172a" : "#f1f5f9",
+                  color: active ? "#fff" : "#64748b",
+                  transition: "all 0.15s",
+                }}>
                 {active ? "✓ " : ""}{cat}
               </button>
             );
@@ -771,7 +787,6 @@ export default function DashboardPage() {
     finally { if (showLoader && mountedRef.current) setLoading(false); }
   }, [isAdminOrHr]);
 
-  // ── Init ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     mountedRef.current = true;
 
@@ -913,11 +928,11 @@ export default function DashboardPage() {
     { id: "expenses", label: "Expenses",                              active: activeTab === "expenses", onClick: () => setActiveTab("expenses") },
     ...(isAdminOrHr ? [
       { id: "approvals", label: `Approvals${pendingReqs.length > 0 ? ` (${pendingReqs.length})` : ""}`, active: activeTab === "approvals", onClick: () => setActiveTab("approvals") },
-      { id: "policy",    label: "Travel Policy", active: activeTab === "policy", onClick: () => setActiveTab("policy") },
+      { id: "policy",    label: "Travel Policy",                        active: activeTab === "policy",    onClick: () => setActiveTab("policy") },
     ] : []),
   ];
 
-  // ── UPDATED: Trip card with expenses panel for employees ──────────────────
+  // ── Trip card ─────────────────────────────────────────────────────────────
   const TripCardWithHistory = ({ r, showEmployee = false, showApproveButtons = false }: {
     r: TravelRequestResponse; showEmployee?: boolean; showApproveButtons?: boolean;
   }) => {
@@ -1023,19 +1038,20 @@ export default function DashboardPage() {
   };
 
   // ── Stat cards ────────────────────────────────────────────────────────────
-  const approvedCount = approvalSummary?.approvedCount    ?? 0;
+  const approvedCount = approvalSummary?.approvedCount  ?? 0;
   const pendingCount  = approvalSummary?.pendingApprovals ?? 0;
-  const rejectedCount = approvalSummary?.rejectedCount    ?? 0;
+  const rejectedCount = approvalSummary?.rejectedCount  ?? 0;
   const totalTrips    = approvedCount + pendingCount + rejectedCount;
 
-  const myApprovedCount = trips.filter(t => t.status === "Approved").length;
-  const myPendingCount  = trips.filter(t => t.status === "Submitted" || t.status === "UnderReview").length;
+  // FIX: Employee approved count — derive directly from trips array (not approvalSummary)
+  const myApprovedCount  = trips.filter(t => t.status === "Approved").length;
+  const myPendingCount   = trips.filter(t => t.status === "Submitted" || t.status === "UnderReview").length;
 
   const employeeStatCards = [
-    { label: "Total Trips",   value: loading ? "—" : String(trips.length),    color: styles.statBlue,   icon: "✈️", chart: trips.length > 0 ? [1, 2, trips.length] : [] },
-    { label: "Approved",      value: loading ? "—" : String(myApprovedCount), color: styles.statGreen,  icon: "✅", chart: myApprovedCount > 0 ? [myApprovedCount] : [] },
-    { label: "Pending Trips", value: loading ? "—" : String(myPendingCount),  color: styles.statAmber,  icon: "⏳", chart: [] },
-    { label: "Reimbursed",    value: loading ? "—" : `₹${((summary?.totalReimbursed ?? 0) / 1000).toFixed(1)}K`, color: styles.statPurple, icon: "💰", chart: [] },
+    { label: "Total Trips",    value: loading ? "—" : String(trips.length),       color: styles.statBlue,   icon: "✈️", chart: trips.length > 0 ? [1, 2, trips.length] : [] },
+    { label: "Approved",       value: loading ? "—" : String(myApprovedCount),    color: styles.statGreen,  icon: "✅", chart: myApprovedCount > 0 ? [myApprovedCount] : [] },
+    { label: "Pending Trips",  value: loading ? "—" : String(myPendingCount),     color: styles.statAmber,  icon: "⏳", chart: [] },
+    { label: "Reimbursed",     value: loading ? "—" : `₹${((summary?.totalReimbursed ?? 0) / 1000).toFixed(1)}K`, color: styles.statPurple, icon: "💰", chart: [] },
   ];
 
   const adminStatCards = [
@@ -1045,7 +1061,7 @@ export default function DashboardPage() {
     { label: "Expense Pipeline",  value: loading || !approvalSummary ? "—" : `₹${((approvalSummary.expensePipeline ?? 0) / 1000).toFixed(1)}K`, color: styles.statPurple, icon: "💰", chart: [] },
   ];
 
-  const statCards       = isAdminOrHr ? adminStatCards : employeeStatCards;
+  const statCards = isAdminOrHr ? adminStatCards : employeeStatCards;
   const pendingExpenses  = allExpenses.filter(e => e.status === "Submitted");
   const resolvedExpenses = allExpenses.filter(e => e.status !== "Submitted");
 
@@ -1097,11 +1113,19 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        {/* Admin: status donut */}
         {isAdminOrHr && !loading && totalTrips > 0 && (
           <StatusDonut approved={approvedCount} pending={pendingCount} rejected={rejectedCount} total={totalTrips} />
         )}
+
+        {/* Admin: analytics preview with bar chart */}
         {isAdminOrHr && !loading && totalTrips > 0 && (
-          <AnalyticsPreviewCard approvedCount={approvedCount} pendingCount={pendingCount} rejectedCount={rejectedCount} navigate={navigate} />
+          <AnalyticsPreviewCard
+            approvedCount={approvedCount}
+            pendingCount={pendingCount}
+            rejectedCount={rejectedCount}
+            navigate={navigate}
+          />
         )}
 
         {/* Stat cards */}
@@ -1133,7 +1157,7 @@ export default function DashboardPage() {
                 💡 Click <strong>🧾 expenses & bills</strong> on any trip to view linked expense claims, upload missing bills, or add new expenses.
               </div>
             )}
-
+            
             {loading ? (
               <div className={styles.loadingRow}>{[1, 2, 3].map(i => <div key={i} className={styles.skeleton} />)}</div>
             ) : trips.length === 0 ? (
@@ -1202,7 +1226,7 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* ══ APPROVALS ══ */}
+        {/* ══ APPROVALS (Admin/HR) ══ */}
         {activeTab === "approvals" && isAdminOrHr && (
           <div className={styles.section}>
             <div className={styles.sectionHeader}>
@@ -1252,7 +1276,7 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* ══ TRAVEL POLICY ══ */}
+        {/* ══ TRAVEL POLICY (Admin/HR) ══ */}
         {activeTab === "policy" && isAdminOrHr && (
           <div className={styles.section}>
             <TravelPolicyConfig />
@@ -1264,14 +1288,14 @@ export default function DashboardPage() {
           <h2 className={styles.sectionTitle}>Quick Actions</h2>
           <div className={styles.quickGrid}>
             {(isAdminOrHr ? [
-              { icon: "📊", label: "View Reports",   sub: "Analytics & insights", path: "/reports" },
-              { icon: "🛡️", label: "Travel Policy",  sub: "Limits & rules",       path: "#policy", action: () => setActiveTab("policy") },
-              { icon: "👤", label: "My Profile",     sub: "Account details",      path: "/profile" },
+              { icon: "📊", label: "View Reports",    sub: "Analytics & insights", path: "/reports"   },
+              { icon: "🛡️", label: "Travel Policy",  sub: "Limits & rules",        path: "#policy",   action: () => setActiveTab("policy") },
+              { icon: "👤", label: "My Profile",      sub: "Account details",      path: "/profile"   },
             ] : [
-              { icon: "✈️", label: "Book Travel",    sub: "New travel request",   path: "/booking/new" },
+              { icon: "✈️", label: "Book Travel",    sub: "New travel request",   path: "/booking/new"    },
               { icon: "🧾", label: "Submit Expense", sub: "Upload a bill",        path: "/expense/submit" },
-              { icon: "📊", label: "View Reports",   sub: "Download reports",     path: "/reports" },
-              { icon: "👤", label: "My Profile",     sub: "Account details",      path: "/profile" },
+              { icon: "📊", label: "View Reports",   sub: "Download reports",     path: "/reports"        },
+              { icon: "👤", label: "My Profile",     sub: "Account details",      path: "/profile"        },
             ]).map(qa => (
               <div key={qa.label} className={styles.quickCard}
                 onClick={() => { if ("action" in qa && qa.action) { qa.action(); } else { navigate(qa.path); } }}

@@ -1,9 +1,5 @@
 // src/services/reportService.ts
-// Connects to: ReportController.cs  (Admin/HR only)
-//   GET /api/Report/dashboard
-//   GET /api/Report/by-transport
-//   GET /api/Report/by-employee
-//   GET /api/Report/by-status
+// Updated interfaces to match the fixed ReportController responses
 
 import { get } from "./apiClient";
 import type { DashboardSummaryResponse } from "./apiClient";
@@ -15,8 +11,10 @@ export interface TransportReport {
 }
 
 export interface EmployeeReport {
+  employeeId:   number;
   displayName:  string;
   employeeCode: string;
+  department:   string;   // ← now included from fixed controller
   totalAmount:  number;
   claimCount:   number;
   approved:     number;
@@ -24,11 +22,11 @@ export interface EmployeeReport {
 }
 
 export interface DepartmentReport {
-  department: string;
+  department:   string;
   requestCount: number;
   expenseTotal: number;
-  approved: number;
-  pending: number;
+  approved:     number;
+  pending:      number;
 }
 
 export interface StatusReport {
@@ -37,7 +35,6 @@ export interface StatusReport {
 }
 
 export const reportService = {
-  /** Admin DashboardPage top stats — same shape as DashboardSummaryDto */
   dashboard: (from?: string, to?: string) => {
     const qs = new URLSearchParams();
     if (from) qs.set("from", from);
@@ -45,8 +42,19 @@ export const reportService = {
     return get<DashboardSummaryResponse>(`/Report/dashboard?${qs}`);
   },
 
-  byTransport: () =>
-    get<TransportReport[]>("/Report/by-transport"),
+  byTransport: (from?: string, to?: string) => {
+    const qs = new URLSearchParams();
+    if (from) qs.set("from", from);
+    if (to)   qs.set("to",   to);
+    return get<TransportReport[]>(`/Report/by-transport?${qs}`);
+  },
+
+  myTransport: (from?: string, to?: string) => {
+    const qs = new URLSearchParams();
+    if (from) qs.set("from", from);
+    if (to)   qs.set("to",   to);
+    return get<TransportReport[]>(`/Report/my-transport?${qs}`);
+  },
 
   byEmployee: (from?: string, to?: string) => {
     const qs = new URLSearchParams();
@@ -56,12 +64,11 @@ export const reportService = {
   },
 
   byDepartment: (from?: string, to?: string) => {
-  const qs = new URLSearchParams();
-  if (from) qs.set("from", from);
-  if (to)   qs.set("to",   to);
-
-  return get<DepartmentReport[]>(`/Report/by-department?${qs}`);
-},
+    const qs = new URLSearchParams();
+    if (from) qs.set("from", from);
+    if (to)   qs.set("to",   to);
+    return get<DepartmentReport[]>(`/Report/by-department?${qs}`);
+  },
 
   byStatus: () =>
     get<StatusReport>("/Report/by-status"),

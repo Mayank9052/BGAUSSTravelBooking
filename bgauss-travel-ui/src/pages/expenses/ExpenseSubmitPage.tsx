@@ -206,7 +206,7 @@ export default function ExpenseSubmitPage() {
       if (billFile) {
         setUploading(true);
         try {
-          await uploadFile(`/Expense/${result.claimId}/upload-bill`, billFile, "file");
+          await uploadFile(`/Expense/${result.claimId}/upload-bill`, billFile);
           setUploadDone(true);
         } catch {
           setMsg({

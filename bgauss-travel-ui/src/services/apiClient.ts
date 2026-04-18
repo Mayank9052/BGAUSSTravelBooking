@@ -24,274 +24,152 @@ function authHeaders(): HeadersInit {
 // ─────────────────────────────────────────────────────────────
 
 export class ApiError extends Error {
-  status: number;
-
-  constructor(message: string, status: number) {
+  constructor(status: number, message: string) {
     super(message);
     this.name = "ApiError";
-    this.status = status;
   }
 }
 
-// ─────────────────────────────────────────────────────────────
-// Response Handler (FIXED)
-// ─────────────────────────────────────────────────────────────
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  const token = localStorage.getItem("jwt_token");
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
 
-async function handleResponse<T>(res: Response): Promise<T> {
-  // No content
-  if (res.status === 204) {
-    return undefined as T;
-  }
-
-  const text = await res.text();
-
-  let data: any;
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = null;
-  }
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
 
   if (!res.ok) {
-    const message =
-      data?.message || `HTTP ${res.status} - ${res.statusText}`;
-
-    throw new ApiError(message, res.status);
+    const msg = await res.text().catch(() => `HTTP ${res.status}`);
+    throw new ApiError(res.status, msg || `HTTP ${res.status}`);
   }
 
-  return data as T;
+  // 204 No Content
+  if (res.status === 204) return undefined as T;
+
+  return res.json() as Promise<T>;
 }
 
-// ─────────────────────────────────────────────────────────────
-// API METHODS (FIXED - consistent error handling)
-// ─────────────────────────────────────────────────────────────
-
-// GET
-export async function get<T>(url: string): Promise<T> {
-  const res = await fetch(`${BASE}${url}`, {
-    method: "GET",
-    headers: authHeaders(),
-  });
-
-  return handleResponse<T>(res);
-}
-
-// POST
-export async function post<T>(url: string, body: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${url}`, {
-    method: "POST",
-    headers: authHeaders(),
-    body: JSON.stringify(body),
-  });
-
-  return handleResponse<T>(res);
-}
-
-// PUT
-export async function put<T>(url: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${url}`, {
-    method: "PUT",
-    headers: authHeaders(),
-    body: body ? JSON.stringify(body) : undefined,
-  });
-
-  return handleResponse<T>(res);
-}
-
-// DELETE
-export async function del<T>(url: string): Promise<T> {
-  const res = await fetch(`${BASE}${url}`, {
-    method: "DELETE",
-    headers: authHeaders(),
-  });
-
-  return handleResponse<T>(res);
-}
-
-// ─────────────────────────────────────────────────────────────
-// FILE UPLOAD (FIXED)
-// ─────────────────────────────────────────────────────────────
-
-export async function uploadFile<T>(
-  url: string,
-  file: File,
-  fieldName = "file"
-): Promise<T> {
-  const token = getToken();
-
+export async function uploadFile<T>(path: string, file: File): Promise<T> {
+  const token = localStorage.getItem("jwt_token");
   const form = new FormData();
-  form.append(fieldName, file);
+  form.append("file", file);
 
-  const res = await fetch(`${BASE}${url}`, {
+  const res = await fetch(`${BASE}${path}`, {
     method: "POST",
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
     body: form,
   });
 
-  return handleResponse<T>(res);
-}
-
-// ─────────────────────────────────────────────────────────────
-// FILE DOWNLOAD (NEW)
-// ─────────────────────────────────────────────────────────────
-
-export async function downloadFile(
-  url: string,
-  fileName?: string
-): Promise<void> {
-  const token = getToken();
-
-  const res = await fetch(`${BASE}${url}`, {
-    method: "GET",
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-
   if (!res.ok) {
-    throw new ApiError(`Download failed (${res.status})`, res.status);
+    const msg = await res.text().catch(() => `HTTP ${res.status}`);
+    throw new ApiError(res.status, msg || `HTTP ${res.status}`);
   }
 
-  const blob = await res.blob();
-
-  // Create download link
-  const link = document.createElement("a");
-  const objectUrl = window.URL.createObjectURL(blob);
-
-  link.href = objectUrl;
-  link.download = fileName || "file";
-  document.body.appendChild(link);
-  link.click();
-
-  // Cleanup
-  link.remove();
-  window.URL.revokeObjectURL(objectUrl);
+  return res.json() as Promise<T>;
 }
 
-// ─────────────────────────────────────────────────────────────
-// FILE VIEW (NEW)
-// ─────────────────────────────────────────────────────────────
+export const get  = <T>(path: string)                     => request<T>("GET",    path);
+export const post = <T>(path: string, body: unknown)      => request<T>("POST",   path, body);
+export const put  = <T>(path: string, body?: unknown)     => request<T>("PUT",    path, body);
+export const del  = <T>(path: string)                     => request<T>("DELETE", path);
 
-export async function viewFile(url: string): Promise<void> {
-  const token = getToken();
-
-  const res = await fetch(`${BASE}${url}`, {
-    method: "GET",
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-
-  if (!res.ok) {
-    throw new ApiError(`View failed (${res.status})`, res.status);
-  }
-
-  const blob = await res.blob();
-  const objectUrl = window.URL.createObjectURL(blob);
-
-  window.open(objectUrl, "_blank");
-}
-
-// ─────────────────────────────────────────────────────────────
-// TYPES
-// ─────────────────────────────────────────────────────────────
+// ── Response Types ────────────────────────────────────────────────────────────
 
 export interface TravelRequestResponse {
-  requestId: number;
-  requestCode: string;
-  employeeId: number;
-  employeeName: string;
-  employeeCode: string;
-  department: string;
-  travelPurpose: string;
-  destination: string;
-  departureDate: string;
-  returnDate: string;
-  transportType: string;
-  estimatedAmount: number | null;
-  status: string;
-  submittedAt: string | null;
-  createdAt: string;
-  notes: string | null;
-
-  originLatitude: number | null;
-  originLongitude: number | null;
-  originAddress: string | null;
-  locationCapturedAt: string | null;
-
-  expenseClaims: ExpenseClaimResponse[];
+  requestId:      number;
+  requestCode:    string;
+  employeeId:     number;
+  employeeName:   string;
+  employeeCode?:  string;
+  /** Snapshotted from TravelEmployee.Department at request creation */
+  department:     string;
+  transportType:  string;
+  destination:    string;
+  travelPurpose:  string;
+  departureDate:  string;
+  returnDate:     string;
+  estimatedAmount?: number;
+  notes?:         string;
+  status:         string;
+  originLatitude?:  number;
+  originLongitude?: number;
+  originAddress?:   string;
+  locationCapturedAt?: string;
+  createdAt:      string;
 }
 
 export interface ExpenseClaimResponse {
-  claimId: number;
-  claimCode: string;
-  requestId: number;
-  requestCode: string | null;
-  employeeId: number;
-  employeeName: string;
-  category: string;
-  amount: number;
-  currency: string;
-  expenseDate: string;
-  description: string | null;
-  billPath: string | null;
+  claimId:       number;
+  claimCode:     string;
+  requestId:     number;
+  employeeId:    number;
+  employeeName:  string;
+  category:      string;
+  amount:        number;
+  currency:      string;
+  expenseDate:   string;
+  description?:  string;
+  billPath:     string | null;
   billFileName: string | null;
-  status: string;
-  rejectionReason: string | null;
-  approvedAt: string | null;
-  reimbursedAt: string | null;
-  createdAt: string;
+  status:        string;
+  approvedBy?:   number;
+  approvedAt?:   string;
+  rejectionReason?: string;
+  reimbursedAt?: string;
+  createdAt:     string;
 }
 
 export interface ExpenseSummaryResponse {
-  totalPending: number;
-  totalApproved: number;
-  totalReimbursed: number;
-  pendingCount: number;
-  approvedCount: number;
-  rejectedCount: number;
-  reimbursedCount: number;
+  totalClaims:      number;
+  pendingCount:     number;
+  approvedCount:    number;
+  rejectedCount:    number;
+  reimbursedCount:  number;
+  totalPending:     number;
+  totalApproved:    number;
+  totalReimbursed:  number;
 }
 
 export interface NotificationResponse {
   notificationId: number;
-  type: string;
-  title: string;
-  message: string;
-  isRead: boolean;
-  requestId: number | null;
-  claimId: number | null;
-  createdAt: string;
-}
-
-export interface DashboardSummaryResponse {
-  totalRequests: number;
-  pendingRequests: number;
-  approvedRequests: number;
-  rejectedRequests: number;
-  totalExpenses: number;
-  pendingExpenses: number;
-  approvedExpenses: number;
-  totalEmployees: number;
+  title:          string;
+  message:        string;
+  type?:          string;
+  requestId?:     number;
+  isRead:         boolean;
+  createdAt:      string;
 }
 
 export interface ApprovalResponse {
-  approvalId: number;
-  requestId: number;
-  approverId: number;
+  approvalId:   number;
+  requestId:    number;
   approverName: string;
-  level: number;
-  action: string;
-  comments: string | null;
-  actionAt: string | null;
-  createdAt: string;
+  action:       string;
+  comments?:    string;
+  actionAt:     string;
+}
+
+export interface DashboardSummaryResponse {
+  totalRequests:    number;
+  pendingRequests:  number;
+  approvedRequests: number;
+  rejectedRequests: number;
+  totalExpenses:    number;
+  pendingExpenses:  number;
+  approvedExpenses: number;
+  totalEmployees:   number;
 }
 
 export interface PagedResult<T> {
   total: number;
-  page: number;
-  pageSize: number;
   items: T[];
 }

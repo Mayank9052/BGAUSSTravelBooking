@@ -145,12 +145,11 @@ const REQUEST_PAGE_CONFIG = {
     icon: "🏨", title: "Hotel Booking Request",
     subtitle: "Raise an accommodation request for approved overnight travel and events.",
     routeLabel: "Hotel", transportType: "Hotel",
-    fieldLabels: { from: "City of Stay", to: "Preferred Area / Property",
-      date1: "Check-in Date", date2: "Check-out Date",
-      option1: "Room Type", option2: "Stay Category" },
+    fieldLabels: { from: "City of Stay", to: "Preferred Area/Property", 
+    date1: "Check-in Date", date2: "Check-out Date", option1: "Room Type", option2: "Stay Category" },
     fromSuggestions: INDIAN_CITIES,
     toSuggestions:   [] as string[],
-    option1Values: ["Standard Single", "Standard Double", "Executive", "Suite", "Twin Sharing"],
+   option1Values: ["Standard", "Executive", "Twin Sharing"],
     option2Values: ["Single Stay", "Extended Stay", "Event Stay", "Conference Stay"],
     showReturnDate: (_: string) => true, // check-out always needed
     policyPoints: [
@@ -284,9 +283,10 @@ export default function TravelRequestFormPage() {
       const employeeId = Number(localStorage.getItem("employee_id") ?? "0");
       const destination = `${form.from.trim()} → ${form.to.trim()}`;
       const purposeWithOpts = `${form.travelPurpose.trim()}\n${config.fieldLabels.option1}: ${form.option1}${form.option2 ? ` | ${config.fieldLabels.option2}: ${form.option2}` : ""}`;
-
+      const department = localStorage.getItem("department") ?? "";
       const result = await bookingService.create({
         employeeId,
+        department,
         travelPurpose:  purposeWithOpts,
         destination,
         departureDate:  form.date1,

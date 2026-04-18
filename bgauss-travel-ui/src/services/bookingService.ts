@@ -1,18 +1,16 @@
 // src/services/bookingService.ts
-// Connects to: BookingController.cs
-//   GET  /api/Booking/my
-//   GET  /api/Booking          (Admin/HR — paginated)
-//   GET  /api/Booking/all      (Admin/HR — flat list for dashboard)
-//   GET  /api/Booking/{id}
-//   POST /api/Booking
-//   PUT  /api/Booking/{id}
-//   DELETE /api/Booking/{id}
+// UPDATED: department added to CreateBookingInput
+//   — When creating a booking, the employee's department (from localStorage)
+//     is sent so the backend can snapshot it onto TravelRequest.Department.
+//   — The backend also reads it from TravelEmployee as primary source.
+//   — department now appears in TravelRequestResponse via apiClient types.
 
 import { get, post, put, del } from "./apiClient";
 import type { TravelRequestResponse, PagedResult } from "./apiClient";
 
 export interface CreateBookingInput {
   employeeId:       number;
+  department?:      string;   // ← NEW: snapshotted from TravelEmployee on backend; sent as fallback
   travelPurpose:    string;
   destination:      string;
   departureDate:    string;   // "yyyy-MM-dd"
@@ -42,16 +40,15 @@ export const bookingService = {
   getMy: () =>
     get<TravelRequestResponse[]>("/Booking/my"),
 
-  /**
-   * Admin/HR DashboardPage — History sub-tab.
-   * Returns a flat array (no pagination) filtered to Approved + Rejected.
-   * Calls GET /api/Booking/my for now (reuses same endpoint scoped by role on backend).
-   * If your BookingController has a dedicated /api/Booking/all, point there instead.
-   */
-  getAllResolved: () =>
-    get<TravelRequestResponse[]>("/Booking/my")
-      .then(list => list.filter(r => r.status === "Approved" || r.status === "Rejected"))
-      .catch(() => [] as TravelRequestResponse[]),
+  /** Admin/HR: all trips, flat list, with optional transport filter */
+  getAllFlat: (transport?: string, status?: string) => {
+    const qs = new URLSearchParams();
+    if (transport) qs.set("transport", transport);
+    if (status)    qs.set("status",    status);
+    qs.set("pageSize", "500");
+    return get<{ total: number; items: TravelRequestResponse[] }>(`/Booking/all?${qs}`)
+      .then(r => r.items ?? r);
+  },
 
   /** Admin/HR pages — paginated with filters */
   getAll: (params?: { status?: string; transport?: string; page?: number; pageSize?: number }) => {
