@@ -181,10 +181,13 @@ function buildQS(from: string, to: string): URLSearchParams {
 }
 
 // ── Number formatters ─────────────────────────────────────────────────────────
-const fmt = (n: number) =>
-  n >= 10_000_000 ? `₹${(n / 10_000_000).toFixed(1)}Cr` :
-  n >= 100_000    ? `₹${(n / 100_000).toFixed(1)}L`     :
-  n >= 1_000      ? `₹${(n / 1_000).toFixed(1)}K`       : `₹${n.toFixed(0)}`;
+const fmt = (n: number | null | undefined): string => {
+      if (n == null || isNaN(n)) return "₹0";
+      return n >= 10_000_000 ? `₹${(n / 10_000_000).toFixed(1)}Cr` :
+             n >= 100_000    ? `₹${(n / 100_000).toFixed(1)}L`     :
+             n >= 1_000      ? `₹${(n / 1_000).toFixed(1)}K`       :
+             `₹${n.toFixed(0)}`;
+    };
 
 const fmtDate = (d: string) => {
   try {
@@ -873,7 +876,7 @@ function AdminAnalytics({
       scales: {
         x: {
           beginAtZero: true,
-          ticks: { callback: v => (v == null ? "" : fmt(v as number)) },
+          ticks: { callback: (v: unknown) => typeof v === "number" ? fmt(v) : "" },
           grid: { color: G },
         },
         y: { grid: { display: false } },

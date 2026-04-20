@@ -24,9 +24,12 @@ export const expenseService = {
     get<ExpenseSummaryResponse>("/Expense/summary"),
 
   // ── GET /api/Expense/my — employee's own claims ──────────────────────────
-  getMy: (status?: string) => {
-    const qs = status ? `?status=${encodeURIComponent(status)}` : "";
-    return get<ExpenseClaimResponse[]>(`/Expense/my${qs}`);
+  getMy: (status?: string, requestId?: number) => {
+    const qs = new URLSearchParams();
+    if (status) qs.set("status", status);
+    if (requestId) qs.set("requestId", String(requestId));
+    const q = qs.toString();
+    return get<ExpenseClaimResponse[]>(`/Expense/my${q ? `?${q}` : ""}`);
   },
 
   getAll: (status?: string, page = 1, pageSize = 20) => {

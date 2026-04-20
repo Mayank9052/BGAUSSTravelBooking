@@ -35,16 +35,17 @@ export const approvalService = {
 
   /** Admin/HR DashboardPage "Approvals" tab — Pending sub-tab */
   pending: () =>
-    get<{
-      pendingRequests: TravelRequestResponse[];
-      pendingExpenses: ExpenseClaimResponse[];
-    }>("/Approval/pending"),
+  get<{
+    pendingRequests: TravelRequestResponse[];
+    pendingExpenses: ExpenseClaimResponse[];
+  }>("/Approval/pending?pageSize=20"),
 
   /** Approve or reject a travel request */
   actionOnRequest: (id: number, dto: ApprovalInput) =>
-    post<{ requestId: number; requestCode: string; status: string }>(
-      `/Approval/request/${id}`, dto
-    ),
+  post<{ requestId: number; requestCode: string; status: string }>(
+    `/Approval/request/${id}`, 
+    { ...dto, action: dto.action.charAt(0).toUpperCase() + dto.action.slice(1) }
+  ),
 
   /** Full approval trail for a single request */
   history: (requestId: number) =>
