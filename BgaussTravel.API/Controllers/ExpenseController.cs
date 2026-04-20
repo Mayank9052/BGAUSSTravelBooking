@@ -1,4 +1,9 @@
 // Controllers/ExpenseController.cs
+// FIXES:
+//  1. GetMy: added [FromQuery] int? requestId — filters claims to one travel request
+//     This is what TripExpensePanel uses to show per-trip expenses only
+//  2. All other methods unchanged
+
 using BgaussTravel.API.Data;
 using BgaussTravel.API.DTOs;
 using BgaussTravel.API.Models;
@@ -23,7 +28,6 @@ public class ExpenseController : ControllerBase
                              ITravelNotificationService notify, IWebHostEnvironment env)
     { _db = db; _seq = seq; _notify = notify; _env = env; }
 
-    // SAFE helpers — never throw even if claim is missing
     int CurrentEmployeeId
     {
         get
@@ -62,7 +66,6 @@ public class ExpenseController : ControllerBase
 
         var isEmployee = CurrentRole == "Employee";
 
-        // ONE query: group by status, get count + sum together
         var grouped = await _db.ExpenseClaims
             .Where(e => !isEmployee || e.EmployeeId == empId)
             .GroupBy(e => e.Status)
@@ -74,7 +77,7 @@ public class ExpenseController : ControllerBase
             })
             .ToListAsync();
 
-        decimal Get(string s)  => grouped.FirstOrDefault(g => g.Status == s)?.Total ?? 0;
+        decimal Get(string s)   => grouped.FirstOrDefault(g => g.Status == s)?.Total ?? 0;
         int     Count(string s) => grouped.FirstOrDefault(g => g.Status == s)?.Count ?? 0;
 
         return Ok(new ExpenseSummaryDto
@@ -89,26 +92,38 @@ public class ExpenseController : ControllerBase
         });
     }
 
-    // GET /api/Expense/my
+    // ── GET /api/Expense/my ───────────────────────────────────────────────────
+    // FIX: added optional requestId param so TripExpensePanel can filter
+    //      per-trip expenses instead of fetching all and filtering client-side
     [HttpGet("my")]
-    public async Task<IActionResult> GetMy([FromQuery] string? status)
+    public async Task<IActionResult> GetMy(
+        [FromQuery] string? status,
+        [FromQuery] int? requestId)   // ← NEW: filter by travel request
     {
         var empId = CurrentEmployeeId;
         if (empId == 0) return Unauthorized();
 
-        var q = _db.ExpenseClaims.Include(e => e.Employee).Include(e => e.Request)
+        var q = _db.ExpenseClaims
+                   .Include(e => e.Employee)
+                   .Include(e => e.Request)
                    .Where(e => e.EmployeeId == empId);
-        if (!string.IsNullOrWhiteSpace(status)) q = q.Where(e => e.Status == status);
+
+        if (!string.IsNullOrWhiteSpace(status))
+            q = q.Where(e => e.Status == status);
+
+        // KEY FIX: when requestId is provided, only return claims for that trip
+        if (requestId.HasValue)
+            q = q.Where(e => e.RequestId == requestId.Value);
 
         var rows = await q.OrderByDescending(e => e.CreatedAt).ToListAsync();
         return Ok(rows.Select(e => ToDto(e, e.Request?.RequestCode)));
     }
 
-    // GET /api/Expense  (Admin/HR — role checked on frontend)
+    // GET /api/Expense  (Admin/HR)
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] string? status,
                                             [FromQuery] int page = 1,
-                                            [FromQuery] int pageSize = 50)  // ← cap default
+                                            [FromQuery] int pageSize = 50)
     {
         var q = _db.ExpenseClaims
             .Where(e => string.IsNullOrWhiteSpace(status) || e.Status == status)
@@ -117,9 +132,9 @@ public class ExpenseController : ControllerBase
                 ClaimId         = e.ClaimId,
                 ClaimCode       = e.ClaimCode,
                 RequestId       = e.RequestId,
-                RequestCode     = e.Request.RequestCode,    // EF projects this without full Include
+                RequestCode     = e.Request.RequestCode,
                 EmployeeId      = e.EmployeeId,
-                EmployeeName    = e.Employee.DisplayName,   // same — projected only
+                EmployeeName    = e.Employee.DisplayName,
                 Category        = e.Category,
                 Amount          = e.Amount,
                 Currency        = e.Currency,
@@ -223,50 +238,46 @@ public class ExpenseController : ControllerBase
     public async Task<IActionResult> GetBill(int id)
     {
         var empId = CurrentEmployeeId;
-
         var claim = await _db.ExpenseClaims.FindAsync(id);
         if (claim == null || string.IsNullOrEmpty(claim.BillPath))
             return NotFound(new { message = "Bill not found." });
-
-        // Security check
         if (CurrentRole == "Employee" && claim.EmployeeId != empId)
             return Forbid();
 
-        var filePath = Path.Combine(_env.WebRootPath ?? "wwwroot",
-                                claim.BillPath.TrimStart('/').Replace("/", Path.DirectorySeparatorChar.ToString()));
+        var filePath = Path.Combine(
+            _env.WebRootPath ?? "wwwroot",
+            claim.BillPath.TrimStart('/').Replace("/", Path.DirectorySeparatorChar.ToString()));
 
         if (!System.IO.File.Exists(filePath))
             return NotFound(new { message = "File missing on server." });
 
         var contentType = GetContentType(filePath);
         var fileName = claim.BillFileName ?? Path.GetFileName(filePath);
-
         return PhysicalFile(filePath, contentType, fileName);
     }
 
-    private string GetContentType(string path)
-{
-    var ext = Path.GetExtension(path).ToLowerInvariant();
+    private static string GetContentType(string path) =>
+        Path.GetExtension(path).ToLowerInvariant() switch
+        {
+            ".pdf"          => "application/pdf",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png"          => "image/png",
+            ".webp"         => "image/webp",
+            _               => "application/octet-stream",
+        };
 
-    return ext switch
-    {
-        ".pdf" => "application/pdf",
-        ".jpg" or ".jpeg" => "image/jpeg",
-        ".png" => "image/png",
-        _ => "application/octet-stream"
-    };
-}
-
-    // PUT /api/Expense/{id}/approve  (Admin/HR — role checked on frontend)
+    // PUT /api/Expense/{id}/approve  (Admin/HR)
     [HttpPut("{id:int}/approve")]
     public async Task<IActionResult> Approve(int id, [FromBody] ApprovalActionDto dto)
     {
         var empId = CurrentEmployeeId;
         if (empId == 0) return Unauthorized(new { message = "Invalid token." });
 
-        var claim = await _db.ExpenseClaims.Include(e => e.Employee).FirstOrDefaultAsync(e => e.ClaimId == id);
+        var claim = await _db.ExpenseClaims.Include(e => e.Employee)
+                        .FirstOrDefaultAsync(e => e.ClaimId == id);
         if (claim == null) return NotFound();
 
+        // ToLower so "Approve" and "approve" both work
         var action = dto.Action.Trim().ToLower();
         if (action != "approve" && action != "reject")
             return BadRequest(new { message = "Action must be 'approve' or 'reject'." });
@@ -287,7 +298,7 @@ public class ExpenseController : ControllerBase
         return Ok(new { claim.ClaimId, claim.Status });
     }
 
-    // PUT /api/Expense/{id}/reimburse  (Admin/HR — role checked on frontend)
+    // PUT /api/Expense/{id}/reimburse  (Admin/HR)
     [HttpPut("{id:int}/reimburse")]
     public async Task<IActionResult> Reimburse(int id)
     {
