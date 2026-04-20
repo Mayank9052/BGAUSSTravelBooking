@@ -333,11 +333,8 @@ function TripExpensePanel({
 
   useEffect(() => {
     setLoading(true);
-    expenseService.getMy()
-      .then(all => {
-        // Filter to claims linked to this specific travel request
-        setClaims(all.filter(c => c.requestId === requestId));
-      })
+    expenseService.getMy(undefined, requestId)
+    .then(claims => setClaims(claims))
       .catch(() => setClaims([]))
       .finally(() => setLoading(false));
   }, [requestId]);

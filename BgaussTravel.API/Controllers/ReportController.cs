@@ -1,12 +1,11 @@
 // Controllers/ReportController.cs
 // FIXES:
-//  1. by-department: TravelRequest.Department may be NULL for old rows
-//     → fallback to Employee.Department via navigation property
-//     → also handles the case where TravelRequest.Department column doesn't exist yet
-//  2. by-employee: was using GroupBy on DisplayName (string, nullable).
-//     Now groups on EmployeeId (int) — returns one row per employee, always.
-//  3. by-transport: date filter now applied (was missing).
-//  4. by-department expense join: fixed to use Request.Department with fallback.
+//  1. /api/Report/dashboard — now scoped by JWT role:
+//       Admin/HR → org-wide totals (all employees)
+//       Employee → only their own TravelRequests + ExpenseClaims
+//  2. /api/Report/my-transport — already employee-scoped (unchanged)
+//  3. /api/Report/by-transport — admin only (unchanged)
+//  4. by-employee / by-department — unchanged (admin only)
 
 using BgaussTravel.API.Data;
 using BgaussTravel.API.DTOs;
@@ -22,7 +21,7 @@ public class ReportController : ControllerBase
     private readonly AppDbContext _db;
     public ReportController(AppDbContext db) => _db = db;
 
-    // ── JWT helper ────────────────────────────────────────────────────────────
+    // ── JWT helpers ───────────────────────────────────────────────────────────
     private int GetEmployeeIdFromToken()
     {
         try
@@ -38,74 +37,123 @@ public class ReportController : ControllerBase
         catch { return 0; }
     }
 
+    private string GetRoleFromToken()
+    {
+        try
+        {
+            var authHeader = Request.Headers["Authorization"].FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(authHeader) || !authHeader.StartsWith("Bearer "))
+                return "Employee";
+            var jwt = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler()
+                        .ReadJwtToken(authHeader["Bearer ".Length..].Trim());
+            return jwt.Claims.FirstOrDefault(c => c.Type == "Role")?.Value ?? "Employee";
+        }
+        catch { return "Employee"; }
+    }
+
+    private bool IsAdminOrHr()
+    {
+        var role = GetRoleFromToken();
+        return role.Equals("Admin", StringComparison.OrdinalIgnoreCase) ||
+               role.Equals("HR",    StringComparison.OrdinalIgnoreCase);
+    }
+
     // ── GET /api/Report/dashboard ─────────────────────────────────────────────
+    // Admin/HR → org-wide sums
+    // Employee → only their own requests and expense claims
     [HttpGet("dashboard")]
     public async Task<IActionResult> Dashboard([FromQuery] DateTime? from, [FromQuery] DateTime? to)
     {
+        var empId = GetEmployeeIdFromToken();
+        if (empId == 0) return Unauthorized(new { message = "Invalid token." });
+
         var start = from ?? DateTime.UtcNow.AddMonths(-1);
         var end   = to   ?? DateTime.UtcNow;
 
         var startDate = DateOnly.FromDateTime(start);
         var endDate   = DateOnly.FromDateTime(end);
 
+        var adminMode = IsAdminOrHr();
+
+        // ── Request counts ────────────────────────────────────────────────────
+        var reqQuery = adminMode
+            ? _db.TravelRequests.Where(r => r.CreatedAt >= start && r.CreatedAt <= end)
+            : _db.TravelRequests.Where(r => r.EmployeeId == empId && r.CreatedAt >= start && r.CreatedAt <= end);
+
+        var allReqQuery = adminMode
+            ? _db.TravelRequests.AsQueryable()
+            : _db.TravelRequests.Where(r => r.EmployeeId == empId);
+
+        var totalRequests    = await reqQuery.CountAsync();
+        var pendingRequests  = await allReqQuery.CountAsync(r => r.Status == "Submitted");
+        var approvedRequests = await allReqQuery.CountAsync(r => r.Status == "Approved");
+        var rejectedRequests = await allReqQuery.CountAsync(r => r.Status == "Rejected");
+
+        // ── Expense sums ──────────────────────────────────────────────────────
+        var expQuery = adminMode
+            ? _db.ExpenseClaims.Where(e => e.ExpenseDate >= startDate && e.ExpenseDate <= endDate && e.Status != "Rejected")
+            : _db.ExpenseClaims.Where(e => e.EmployeeId == empId && e.ExpenseDate >= startDate && e.ExpenseDate <= endDate && e.Status != "Rejected");
+
+        var allExpQuery = adminMode
+            ? _db.ExpenseClaims.AsQueryable()
+            : _db.ExpenseClaims.Where(e => e.EmployeeId == empId);
+
+        var totalExpenses    = await expQuery.SumAsync(e => (decimal?)e.Amount) ?? 0;
+        var pendingExpenses  = await allExpQuery.Where(e => e.Status == "Submitted").SumAsync(e => (decimal?)e.Amount) ?? 0;
+        var approvedExpenses = await allExpQuery.Where(e => e.Status == "Approved" || e.Status == "Reimbursed").SumAsync(e => (decimal?)e.Amount) ?? 0;
+
+        // TotalEmployees only makes sense for admin; for employees show their own team count (or 0)
+        var totalEmployees = adminMode
+            ? await _db.TravelEmployees.CountAsync(e => e.IsActive && e.Role == "Employee")
+            : 0;
+
         return Ok(new DashboardSummaryDto
         {
-            TotalRequests = await _db.TravelRequests
-                .CountAsync(r => r.CreatedAt >= start && r.CreatedAt <= end),
-
-            PendingRequests  = await _db.TravelRequests.CountAsync(r => r.Status == "Submitted"),
-            ApprovedRequests = await _db.TravelRequests.CountAsync(r => r.Status == "Approved"),
-            RejectedRequests = await _db.TravelRequests.CountAsync(r => r.Status == "Rejected"),
-
-            // ✅ FIX HERE
-            TotalExpenses = await _db.ExpenseClaims
-                .Where(e => e.ExpenseDate >= startDate && e.ExpenseDate <= endDate)
-                .Where(e => e.Status != "Rejected")
-                .SumAsync(e => (decimal?)e.Amount) ?? 0,
-
-            PendingExpenses = await _db.ExpenseClaims
-                .Where(e => e.Status == "Submitted")
-                .SumAsync(e => (decimal?)e.Amount) ?? 0,
-
-            ApprovedExpenses = await _db.ExpenseClaims
-                .Where(e => e.Status == "Approved" || e.Status == "Reimbursed")
-                .SumAsync(e => (decimal?)e.Amount) ?? 0,
-
-            TotalEmployees = await _db.TravelEmployees
-                .CountAsync(e => e.IsActive && e.Role == "Employee"),
+            TotalRequests    = totalRequests,
+            PendingRequests  = pendingRequests,
+            ApprovedRequests = approvedRequests,
+            RejectedRequests = rejectedRequests,
+            TotalExpenses    = totalExpenses,
+            PendingExpenses  = pendingExpenses,
+            ApprovedExpenses = approvedExpenses,
+            TotalEmployees   = totalEmployees,
         });
     }
 
-    // ── GET /api/Report/by-transport (Admin — all employees, with date filter) ─
+    // ── GET /api/Report/by-transport (Admin — all employees) ─────────────────
+    // In ReportController.cs — fix by-transport
     [HttpGet("by-transport")]
-    public async Task<IActionResult> ByTransport(
-        [FromQuery] DateTime? from,
-        [FromQuery] DateTime? to)
+    public async Task<IActionResult> ByTransport([FromQuery] DateTime? from, [FromQuery] DateTime? to)
     {
         var start = from ?? DateTime.UtcNow.AddYears(-5);
         var end   = to   ?? DateTime.UtcNow;
 
-        var data = await _db.TravelRequests
+        // Get all requests in date range
+        var requests = await _db.TravelRequests
             .Where(r => r.CreatedAt >= start && r.CreatedAt <= end)
-            .GroupBy(r => r.TransportType)
-            .Select(g => new
-            {
-                Transport = g.Key ?? "Unknown",
+            .Select(r => new { r.RequestId, r.TransportType })
+            .ToListAsync();
 
-                Count = g.Count(),
+        var requestIds = requests.Select(r => r.RequestId).ToList();
 
-                // 🔥 TotalAmount from ExpenseClaims
-                TotalAmount = _db.ExpenseClaims
-                    .Where(e =>
-                        g.Select(r => r.RequestId).Contains(e.RequestId) &&   // match Request
-                        e.Category != null &&
-                        g.Key != null &&
-                        EF.Functions.Like(e.Category, "%" + g.Key + "%")     // match TransportType in Category
-                    )
-                    .Sum(e => (decimal?)e.Amount) ?? 0
+        // Sum expenses by requestId (not by category LIKE match)
+        var expensesByRequest = await _db.ExpenseClaims
+            .Where(e => requestIds.Contains(e.RequestId) && e.Status != "Rejected")
+            .GroupBy(e => e.RequestId)
+            .Select(g => new { RequestId = g.Key, Total = g.Sum(e => e.Amount) })
+            .ToListAsync();
+
+        var expMap = expensesByRequest.ToDictionary(e => e.RequestId, e => e.Total);
+
+        var data = requests
+            .GroupBy(r => r.TransportType ?? "Unknown")
+            .Select(g => new {
+                Transport   = g.Key,
+                Count       = g.Count(),
+                TotalAmount = g.Sum(r => expMap.TryGetValue(r.RequestId, out var amt) ? amt : 0m),
             })
             .OrderByDescending(x => x.Count)
-            .ToListAsync();
+            .ToList();
 
         return Ok(data);
     }
@@ -145,17 +193,14 @@ public class ReportController : ControllerBase
         return Ok(data);
     }
 
-    // ── GET /api/Report/by-employee ───────────────────────────────────────────
-    // FIX: Group on EmployeeId (int — never null), not DisplayName (string — nullable).
-    //      Pull employee metadata separately and join in memory.
-    //      This guarantees 1 row per employee regardless of nulls.
+    // ── GET /api/Report/by-employee (Admin only) ──────────────────────────────
     [HttpGet("by-employee")]
     public async Task<IActionResult> ByEmployee([FromQuery] DateTime? from, [FromQuery] DateTime? to)
     {
         var start = from ?? DateTime.UtcNow.AddMonths(-3);
         var end   = to   ?? DateTime.UtcNow;
 
-        // Step 1: Aggregate expense claims grouped by EmployeeId
+        // Group expense claims by EmployeeId (never null)
         var claimGroups = await _db.ExpenseClaims
             .GroupBy(e => e.EmployeeId)
             .Select(g => new
@@ -171,22 +216,14 @@ public class ReportController : ControllerBase
         if (!claimGroups.Any())
             return Ok(Array.Empty<object>());
 
-        // Step 2: Fetch employee metadata for only those IDs
         var empIds = claimGroups.Select(g => g.EmployeeId).Distinct().ToList();
         var employees = await _db.TravelEmployees
             .Where(e => empIds.Contains(e.EmployeeId))
-            .Select(e => new
-            {
-                e.EmployeeId,
-                e.DisplayName,
-                e.EmployeeCode,
-                e.Department,
-            })
+            .Select(e => new { e.EmployeeId, e.DisplayName, e.EmployeeCode, e.Department })
             .ToListAsync();
 
         var empMap = employees.ToDictionary(e => e.EmployeeId);
 
-        // Step 3: Join and build response
         var result = claimGroups
             .Select(g =>
             {
@@ -209,15 +246,9 @@ public class ReportController : ControllerBase
         return Ok(result);
     }
 
-    // ── GET /api/Report/by-department ─────────────────────────────────────────
-    // FIX: TravelRequest.Department may be NULL for rows created before the
-    //      column was added. Fallback chain:
-    //        TravelRequest.Department → Employee.Department → "Unknown"
-    //      We load requests with Employee included and resolve dept in memory.
+    // ── GET /api/Report/by-department (Admin only) ────────────────────────────
     [HttpGet("by-department")]
-    public async Task<IActionResult> ByDepartment(
-        [FromQuery] DateTime? from,
-        [FromQuery] DateTime? to)
+    public async Task<IActionResult> ByDepartment([FromQuery] DateTime? from, [FromQuery] DateTime? to)
     {
         var start = from ?? DateTime.UtcNow.AddYears(-1);
         var end   = to   ?? DateTime.UtcNow;
@@ -270,6 +301,7 @@ public class ReportController : ControllerBase
 
         return Ok(data);
     }
+
     // ── GET /api/Report/by-status ─────────────────────────────────────────────
     [HttpGet("by-status")]
     public async Task<IActionResult> ByStatus()
