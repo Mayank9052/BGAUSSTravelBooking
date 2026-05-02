@@ -1,4 +1,10 @@
 // Controllers/ExpenseController.cs
+// CHANGES vs original:
+//   • ITravelEmailService injected
+//   • Create():    fire SendClaimSubmissionEmailsAsync after SaveChanges (non-blocking)
+//   • Approve():   fire SendClaimStatusUpdateEmailAsync after SaveChanges (non-blocking)
+//   • Reimburse(): fire SendClaimReimbursedEmailAsync after SaveChanges (non-blocking)
+
 using BgaussTravel.API.Data;
 using BgaussTravel.API.DTOs;
 using BgaussTravel.API.Models;
@@ -17,13 +23,22 @@ public class ExpenseController : ControllerBase
     private readonly AppDbContext _db;
     private readonly ICodeSequenceService _seq;
     private readonly ITravelNotificationService _notify;
+    private readonly ITravelEmailService _email;           // ← NEW
     private readonly IWebHostEnvironment _env;
 
     public ExpenseController(AppDbContext db, ICodeSequenceService seq,
-                             ITravelNotificationService notify, IWebHostEnvironment env)
-    { _db = db; _seq = seq; _notify = notify; _env = env; }
+                             ITravelNotificationService notify,
+                             ITravelEmailService email,            // ← NEW
+                             IWebHostEnvironment env)
+    {
+        _db     = db;
+        _seq    = seq;
+        _notify = notify;
+        _email  = email;
+        _env    = env;
+    }
 
-    // SAFE helpers — never throw even if claim is missing
+    // ── Safe JWT helpers ──────────────────────────────────────────────────────
     int CurrentEmployeeId
     {
         get
@@ -54,6 +69,7 @@ public class ExpenseController : ControllerBase
         ApprovedAt = e.ApprovedAt, ReimbursedAt = e.ReimbursedAt, CreatedAt = e.CreatedAt,
     };
 
+    // ── GET /api/Expense/summary ──────────────────────────────────────────────
     [HttpGet("summary")]
     public async Task<IActionResult> Summary()
     {
@@ -62,20 +78,14 @@ public class ExpenseController : ControllerBase
 
         var isEmployee = CurrentRole == "Employee";
 
-        // ONE query: group by status, get count + sum together
         var grouped = await _db.ExpenseClaims
             .Where(e => !isEmployee || e.EmployeeId == empId)
             .GroupBy(e => e.Status)
-            .Select(g => new
-            {
-                Status = g.Key,
-                Count  = g.Count(),
-                Total  = g.Sum(e => e.Amount),
-            })
+            .Select(g => new { Status = g.Key, Count = g.Count(), Total = g.Sum(e => e.Amount) })
             .ToListAsync();
 
-        decimal Get(string s)  => grouped.FirstOrDefault(g => g.Status == s)?.Total ?? 0;
-        int     Count(string s) => grouped.FirstOrDefault(g => g.Status == s)?.Count ?? 0;
+        decimal Get(string s)   => grouped.FirstOrDefault(g => g.Status == s)?.Total ?? 0;
+        int     Count(string s) => grouped.FirstOrDefault(g => g.Status == s)?.Count  ?? 0;
 
         return Ok(new ExpenseSummaryDto
         {
@@ -89,7 +99,7 @@ public class ExpenseController : ControllerBase
         });
     }
 
-    // GET /api/Expense/my
+    // ── GET /api/Expense/my ───────────────────────────────────────────────────
     [HttpGet("my")]
     public async Task<IActionResult> GetMy([FromQuery] string? status)
     {
@@ -104,47 +114,36 @@ public class ExpenseController : ControllerBase
         return Ok(rows.Select(e => ToDto(e, e.Request?.RequestCode)));
     }
 
-    // GET /api/Expense  (Admin/HR — role checked on frontend)
+    // ── GET /api/Expense ──────────────────────────────────────────────────────
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] string? status,
                                             [FromQuery] int page = 1,
-                                            [FromQuery] int pageSize = 50)  // ← cap default
+                                            [FromQuery] int pageSize = 50)
     {
         var q = _db.ExpenseClaims
             .Where(e => string.IsNullOrWhiteSpace(status) || e.Status == status)
             .Select(e => new ExpenseClaimResponseDto
             {
-                ClaimId         = e.ClaimId,
-                ClaimCode       = e.ClaimCode,
-                RequestId       = e.RequestId,
-                RequestCode     = e.Request.RequestCode,    // EF projects this without full Include
-                EmployeeId      = e.EmployeeId,
-                EmployeeName    = e.Employee.DisplayName,   // same — projected only
-                Category        = e.Category,
-                Amount          = e.Amount,
-                Currency        = e.Currency,
-                ExpenseDate     = e.ExpenseDate,
-                Description     = e.Description,
-                BillPath        = e.BillPath,
-                BillFileName    = e.BillFileName,
-                Status          = e.Status,
+                ClaimId         = e.ClaimId,    ClaimCode       = e.ClaimCode,
+                RequestId       = e.RequestId,  RequestCode     = e.Request.RequestCode,
+                EmployeeId      = e.EmployeeId, EmployeeName    = e.Employee.DisplayName,
+                Category        = e.Category,   Amount          = e.Amount,
+                Currency        = e.Currency,   ExpenseDate     = e.ExpenseDate,
+                Description     = e.Description, BillPath       = e.BillPath,
+                BillFileName    = e.BillFileName, Status        = e.Status,
                 RejectionReason = e.RejectionReason,
-                ApprovedAt      = e.ApprovedAt,
-                ReimbursedAt    = e.ReimbursedAt,
+                ApprovedAt      = e.ApprovedAt, ReimbursedAt    = e.ReimbursedAt,
                 CreatedAt       = e.CreatedAt,
             });
 
         var total = await q.CountAsync();
-        var items = await q
-            .OrderByDescending(e => e.CreatedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync();
+        var items = await q.OrderByDescending(e => e.CreatedAt)
+                           .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync();
 
         return Ok(new { total, page, pageSize, items });
     }
 
-    // GET /api/Expense/{id}
+    // ── GET /api/Expense/{id} ─────────────────────────────────────────────────
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id)
     {
@@ -156,7 +155,7 @@ public class ExpenseController : ControllerBase
         return Ok(ToDto(e, e.Request?.RequestCode));
     }
 
-    // POST /api/Expense
+    // ── POST /api/Expense ─────────────────────────────────────────────────────
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateExpenseClaimDto dto)
     {
@@ -171,25 +170,40 @@ public class ExpenseController : ControllerBase
         var code = await _seq.NextAsync("EXP");
         var claim = new ExpenseClaim
         {
-            RequestId = dto.RequestId, EmployeeId = empId, ClaimCode = code,
-            Category = dto.Category, Amount = dto.Amount, Currency = dto.Currency,
+            RequestId   = dto.RequestId,  EmployeeId  = empId,
+            ClaimCode   = code,           Category    = dto.Category,
+            Amount      = dto.Amount,     Currency    = dto.Currency,
             ExpenseDate = dto.ExpenseDate, Description = dto.Description,
-            Status = "Submitted", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+            Status      = "Submitted",    CreatedAt   = DateTime.UtcNow,
+            UpdatedAt   = DateTime.UtcNow,
         };
         _db.ExpenseClaims.Add(claim);
         await _db.SaveChangesAsync();
 
+        // ── SignalR push (existing) ────────────────────────────────────────────
         var emp = await _db.TravelEmployees.FindAsync(empId);
         await _notify.NotifyAdminsAndHrAsync(empId, "ExpenseClaim",
             "New Expense Claim",
             $"{emp?.DisplayName} submitted {code} ₹{dto.Amount:N0} ({dto.Category})",
             claimId: claim.ClaimId);
 
+        // ── SMTP emails (non-blocking) ────────────────────────────────────────
+        if (emp != null)
+        {
+            var claimSnapshot   = claim;
+            var requestSnapshot = request;
+            _ = Task.Run(async () =>
+            {
+                try { await _email.SendClaimSubmissionEmailsAsync(claimSnapshot, emp, requestSnapshot); }
+                catch (Exception ex) { Console.Error.WriteLine($"[Email] Claim submission failed for {code}: {ex.Message}"); }
+            });
+        }
+
         return CreatedAtAction(nameof(GetById), new { id = claim.ClaimId },
                                new { claim.ClaimId, claim.ClaimCode });
     }
 
-    // POST /api/Expense/{id}/upload-bill
+    // ── POST /api/Expense/{id}/upload-bill ────────────────────────────────────
     [HttpPost("{id:int}/upload-bill")]
     [RequestSizeLimit(10 * 1024 * 1024)]
     public async Task<IActionResult> UploadBill(int id, IFormFile file)
@@ -218,53 +232,42 @@ public class ExpenseController : ControllerBase
         return Ok(new { claim.ClaimId, claim.BillPath, claim.BillFileName });
     }
 
-    // GET /api/Expense/{id}/bill
+    // ── GET /api/Expense/{id}/bill ────────────────────────────────────────────
     [HttpGet("{id:int}/bill")]
     public async Task<IActionResult> GetBill(int id)
     {
         var empId = CurrentEmployeeId;
-
         var claim = await _db.ExpenseClaims.FindAsync(id);
         if (claim == null || string.IsNullOrEmpty(claim.BillPath))
             return NotFound(new { message = "Bill not found." });
-
-        // Security check
-        if (CurrentRole == "Employee" && claim.EmployeeId != empId)
-            return Forbid();
+        if (CurrentRole == "Employee" && claim.EmployeeId != empId) return Forbid();
 
         var filePath = Path.Combine(_env.WebRootPath ?? "wwwroot",
-                                claim.BillPath.TrimStart('/').Replace("/", Path.DirectorySeparatorChar.ToString()));
-
+            claim.BillPath.TrimStart('/').Replace("/", Path.DirectorySeparatorChar.ToString()));
         if (!System.IO.File.Exists(filePath))
             return NotFound(new { message = "File missing on server." });
 
-        var contentType = GetContentType(filePath);
-        var fileName = claim.BillFileName ?? Path.GetFileName(filePath);
+        var contentType = Path.GetExtension(filePath).ToLowerInvariant() switch
+        {
+            ".pdf"           => "application/pdf",
+            ".jpg" or ".jpeg"=> "image/jpeg",
+            ".png"           => "image/png",
+            _                => "application/octet-stream",
+        };
 
-        return PhysicalFile(filePath, contentType, fileName);
+        return PhysicalFile(filePath, contentType, claim.BillFileName ?? Path.GetFileName(filePath));
     }
 
-    private string GetContentType(string path)
-{
-    var ext = Path.GetExtension(path).ToLowerInvariant();
-
-    return ext switch
-    {
-        ".pdf" => "application/pdf",
-        ".jpg" or ".jpeg" => "image/jpeg",
-        ".png" => "image/png",
-        _ => "application/octet-stream"
-    };
-}
-
-    // PUT /api/Expense/{id}/approve  (Admin/HR — role checked on frontend)
+    // ── PUT /api/Expense/{id}/approve ─────────────────────────────────────────
     [HttpPut("{id:int}/approve")]
     public async Task<IActionResult> Approve(int id, [FromBody] ApprovalActionDto dto)
     {
         var empId = CurrentEmployeeId;
         if (empId == 0) return Unauthorized(new { message = "Invalid token." });
 
-        var claim = await _db.ExpenseClaims.Include(e => e.Employee).FirstOrDefaultAsync(e => e.ClaimId == id);
+        var claim = await _db.ExpenseClaims
+            .Include(e => e.Employee)
+            .FirstOrDefaultAsync(e => e.ClaimId == id);
         if (claim == null) return NotFound();
 
         var action = dto.Action.Trim().ToLower();
@@ -278,23 +281,38 @@ public class ExpenseController : ControllerBase
         claim.UpdatedAt       = DateTime.UtcNow;
         await _db.SaveChangesAsync();
 
+        // ── SignalR push (existing) ────────────────────────────────────────────
         await _notify.NotifyUserAsync(claim.EmployeeId, empId, "ExpenseClaim",
             $"Expense {(action == "approve" ? "Approved ✅" : "Rejected ❌")}",
             $"Your claim {claim.ClaimCode} ₹{claim.Amount:N0} has been {claim.Status.ToLower()}." +
             (dto.Comments != null ? $" Remarks: {dto.Comments}" : ""),
             claimId: claim.ClaimId);
 
+        // ── SMTP email (non-blocking) ─────────────────────────────────────────
+        var employeeSnapshot = claim.Employee;
+        var comments         = dto.Comments;
+        if (employeeSnapshot != null)
+        {
+            _ = Task.Run(async () =>
+            {
+                try { await _email.SendClaimStatusUpdateEmailAsync(claim, employeeSnapshot, comments); }
+                catch (Exception ex) { Console.Error.WriteLine($"[Email] Claim status update failed for {claim.ClaimCode}: {ex.Message}"); }
+            });
+        }
+
         return Ok(new { claim.ClaimId, claim.Status });
     }
 
-    // PUT /api/Expense/{id}/reimburse  (Admin/HR — role checked on frontend)
+    // ── PUT /api/Expense/{id}/reimburse ───────────────────────────────────────
     [HttpPut("{id:int}/reimburse")]
     public async Task<IActionResult> Reimburse(int id)
     {
         var empId = CurrentEmployeeId;
         if (empId == 0) return Unauthorized(new { message = "Invalid token." });
 
-        var claim = await _db.ExpenseClaims.FindAsync(id);
+        var claim = await _db.ExpenseClaims
+            .Include(e => e.Employee)                       // ← needed for email
+            .FirstOrDefaultAsync(e => e.ClaimId == id);
         if (claim == null) return NotFound();
         if (claim.Status != "Approved")
             return BadRequest(new { message = "Only approved claims can be reimbursed." });
@@ -304,10 +322,22 @@ public class ExpenseController : ControllerBase
         claim.UpdatedAt    = DateTime.UtcNow;
         await _db.SaveChangesAsync();
 
+        // ── SignalR push (existing) ────────────────────────────────────────────
         await _notify.NotifyUserAsync(claim.EmployeeId, empId, "Reimbursement",
             "Reimbursement Processed 💰",
             $"Your claim {claim.ClaimCode} of ₹{claim.Amount:N0} has been reimbursed.",
             claimId: claim.ClaimId);
+
+        // ── SMTP email (non-blocking) ─────────────────────────────────────────
+        var employeeSnapshot = claim.Employee;
+        if (employeeSnapshot != null)
+        {
+            _ = Task.Run(async () =>
+            {
+                try { await _email.SendClaimReimbursedEmailAsync(claim, employeeSnapshot); }
+                catch (Exception ex) { Console.Error.WriteLine($"[Email] Reimbursement email failed for {claim.ClaimCode}: {ex.Message}"); }
+            });
+        }
 
         return Ok(new { claim.ClaimId, claim.Status, claim.ReimbursedAt });
     }
