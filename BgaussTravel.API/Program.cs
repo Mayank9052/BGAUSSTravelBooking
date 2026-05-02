@@ -30,6 +30,7 @@ builder.Services.AddSignalR();
 // ── SERVICES ────────────────────────────────────────────
 builder.Services.AddScoped<ICodeSequenceService, CodeSequenceService>();
 builder.Services.AddScoped<ITravelNotificationService, TravelNotificationService>();
+builder.Services.AddScoped<ITravelEmailService, TravelEmailService>();
 
 // ── CORS ───────────────────────────────────────────────
 builder.Services.AddCors(opt => opt.AddDefaultPolicy(p =>

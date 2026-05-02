@@ -1,5 +1,13 @@
+// Controllers/BookingController.cs  (relevant changes only — show full Create method)
+//
+// CHANGES vs original:
+//   • ITravelEmailService injected
+//   • Create(): after SaveChangesAsync, fire SendSubmissionEmailsAsync (non-blocking)
+//   • SubmittedAt set on the request so emails show the correct timestamp
+
 using BgaussTravel.API.Data;
 using BgaussTravel.API.Models;
+using BgaussTravel.API.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.IdentityModel.Tokens.Jwt;
@@ -12,7 +20,13 @@ namespace BgaussTravel.API.Controllers;
 public class BookingController : ControllerBase
 {
     private readonly AppDbContext _db;
-    public BookingController(AppDbContext db) => _db = db;
+    private readonly ITravelEmailService _email;          // ← NEW
+
+    public BookingController(AppDbContext db, ITravelEmailService email)
+    {
+        _db    = db;
+        _email = email;
+    }
 
     // Helper: extract EmployeeId from Bearer JWT
     private int GetEmployeeIdFromJwt()
@@ -44,8 +58,8 @@ public class BookingController : ControllerBase
                 r.RequestId,
                 r.RequestCode,
                 r.EmployeeId,
-                EmployeeName = r.Employee.DisplayName,
-                Department   = r.Department ?? r.Employee.Department ?? "",   // ← snapshot or live
+                EmployeeName  = r.Employee.DisplayName,
+                Department    = r.Department ?? r.Employee.Department ?? "",
                 r.TransportType,
                 r.Destination,
                 r.TravelPurpose,
@@ -90,9 +104,9 @@ public class BookingController : ControllerBase
                 r.RequestId,
                 r.RequestCode,
                 r.EmployeeId,
-                EmployeeName = r.Employee.DisplayName,
-                EmployeeCode = r.Employee.EmployeeCode,
-                Department   = r.Department ?? r.Employee.Department ?? "",   // ← snapshot or live
+                EmployeeName  = r.Employee.DisplayName,
+                EmployeeCode  = r.Employee.EmployeeCode,
+                Department    = r.Department ?? r.Employee.Department ?? "",
                 r.TransportType,
                 r.Destination,
                 r.TravelPurpose,
@@ -118,18 +132,18 @@ public class BookingController : ControllerBase
         var employee = await _db.TravelEmployees.FindAsync(dto.EmployeeId);
         if (employee == null) return NotFound(new { message = "Employee not found." });
 
-        // Generate request code
-        var count = await _db.TravelRequests.CountAsync() + 1;
-        var code  = $"TR-{DateTime.UtcNow:yyyyMM}-{count:D4}";
+        var count  = await _db.TravelRequests.CountAsync() + 1;
+        var code   = $"TR-{DateTime.UtcNow:yyyyMM}-{count:D4}";
+        var now    = DateTime.UtcNow;                          // ← capture once
         var department = !string.IsNullOrWhiteSpace(employee.Department)
                         ? employee.Department
                         : dto.Department;
 
         var request = new TravelRequest
         {
-            RequestCode  = code,
-            EmployeeId   = dto.EmployeeId,
-            Department   = department ?? "",  // ← SNAPSHOT from employee
+            RequestCode        = code,
+            EmployeeId         = dto.EmployeeId,
+            Department         = department ?? "",
             TransportType      = dto.TransportType,
             Destination        = dto.Destination,
             TravelPurpose      = dto.TravelPurpose,
@@ -138,35 +152,46 @@ public class BookingController : ControllerBase
             EstimatedAmount    = dto.EstimatedAmount,
             Notes              = dto.Notes,
             Status             = "Submitted",
+            SubmittedAt        = now,                          // ← set here so emails show it
             OriginLatitude     = dto.OriginLatitude,
             OriginLongitude    = dto.OriginLongitude,
             OriginAddress      = dto.OriginAddress,
             LocationCapturedAt = dto.LocationCapturedAt.HasValue
                 ? dto.LocationCapturedAt.Value.ToUniversalTime()
                 : null,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
+            CreatedAt          = now,
+            UpdatedAt          = now,
         };
 
         _db.TravelRequests.Add(request);
         await _db.SaveChangesAsync();
 
-        // Send notification (if NotificationService is injected)
-        // await _notifService.NotifyAdmins("New Travel Request", $"{employee.DisplayName} submitted {code}");
+        // ── Fire emails (non-blocking — never let email failure break the API) ──
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _email.SendSubmissionEmailsAsync(request, employee);
+            }
+            catch (Exception ex)
+            {
+                // Logged inside SendSubmissionEmailsAsync; this outer catch is belt-and-suspenders
+                Console.Error.WriteLine($"[Email] Unhandled error for {request.RequestCode}: {ex.Message}");
+            }
+        });
 
         return Ok(new { requestId = request.RequestId, requestCode = request.RequestCode });
     }
 
+    // ── PUT /api/Booking/{id} ─────────────────────────────────────────────────
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, [FromBody] UpdateTravelRequestDto dto)
     {
-        var empId = GetEmployeeIdFromJwt();  // ✅ FIX
-        var r = await _db.TravelRequests.FindAsync(id);
+        var empId = GetEmployeeIdFromJwt();
+        var r     = await _db.TravelRequests.FindAsync(id);
 
         if (r == null) return NotFound(new { message = "Request not found." });
-
-        if (empId > 0 && r.EmployeeId != empId)
-            return Forbid();
+        if (empId > 0 && r.EmployeeId != empId) return Forbid();
 
         if (r.Status != "Draft" && r.Status != "Submitted")
             return BadRequest(new { message = $"Cannot edit a request with status '{r.Status}'." });
@@ -180,22 +205,20 @@ public class BookingController : ControllerBase
         if (dto.Notes           != null)  r.Notes           = dto.Notes;
 
         r.UpdatedAt = DateTime.UtcNow;
-
         await _db.SaveChangesAsync();
 
         return Ok(new { r.RequestId, r.Status });
     }
 
+    // ── DELETE /api/Booking/{id} ──────────────────────────────────────────────
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id)
     {
-        var empId = GetEmployeeIdFromJwt();  // ✅ FIX
-        var r = await _db.TravelRequests.FindAsync(id);
+        var empId = GetEmployeeIdFromJwt();
+        var r     = await _db.TravelRequests.FindAsync(id);
 
         if (r == null) return NotFound();
-
-        if (empId > 0 && r.EmployeeId != empId)
-            return Forbid();
+        if (empId > 0 && r.EmployeeId != empId) return Forbid();
 
         if (r.Status != "Draft")
             return BadRequest(new { message = "Only draft requests can be deleted." });
