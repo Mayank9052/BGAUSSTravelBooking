@@ -1,4 +1,8 @@
 // Controllers/ApprovalController.cs
+//
+// CHANGES vs original:
+//   • ITravelEmailService injected
+//   • ActionOnRequest(): after SaveChangesAsync, fire SendStatusUpdateEmailAsync (non-blocking)
 
 using BgaussTravel.API.Data;
 using BgaussTravel.API.DTOs;
@@ -16,9 +20,17 @@ public class ApprovalController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly ITravelNotificationService _notify;
+    private readonly ITravelEmailService _email;          // ← NEW
 
-    public ApprovalController(AppDbContext db, ITravelNotificationService notify)
-    { _db = db; _notify = notify; }
+    public ApprovalController(
+        AppDbContext db,
+        ITravelNotificationService notify,
+        ITravelEmailService email)                        // ← NEW
+    {
+        _db     = db;
+        _notify = notify;
+        _email  = email;
+    }
 
     int GetEmployeeIdFromToken()
     {
@@ -35,15 +47,9 @@ public class ApprovalController : ControllerBase
     }
 
     // ── GET /api/Approval/summary ─────────────────────────────────────────────
-    // Powers the HR/Admin stat cards on the dashboard.
-    // Returns counts for every request status + resolved list for History tab.
-    // BEFORE: Summary() makes many separate DB calls
-    // AFTER: One grouped query + one expense sum
-
     [HttpGet("summary")]
     public async Task<IActionResult> Summary()
     {
-        // Single round-trip for all status counts
         var statusCounts = await _db.TravelRequests
             .GroupBy(r => r.Status)
             .Select(g => new { Status = g.Key, Count = g.Count() })
@@ -52,16 +58,14 @@ public class ApprovalController : ControllerBase
         var countByStatus = statusCounts.ToDictionary(x => x.Status, x => x.Count);
         int Get(string s) => countByStatus.TryGetValue(s, out var c) ? c : 0;
 
-        // Single round-trip for expense pipeline — add timeout safety
         var expensePipeline = await _db.ExpenseClaims
             .Where(e => e.Status == "Submitted")
             .SumAsync(e => (decimal?)e.Amount) ?? 0m;
 
-        // Resolved requests — limit columns fetched, no unnecessary includes
         var resolvedRequests = await _db.TravelRequests
             .Where(r => r.Status == "Approved" || r.Status == "Rejected")
             .OrderByDescending(r => r.UpdatedAt)
-            .Take(100)                          // ← ADD: cap at 100 rows
+            .Take(100)
             .Select(r => new
             {
                 requestId       = r.RequestId,
@@ -77,7 +81,6 @@ public class ApprovalController : ControllerBase
                 createdAt       = r.CreatedAt,
                 updatedAt       = r.UpdatedAt,
                 notes           = r.Notes,
-                // Join employee inline — no .Include() needed
                 employeeId      = r.Employee.EmployeeId,
                 employeeName    = r.Employee.DisplayName,
                 employeeCode    = r.Employee.EmployeeCode,
@@ -179,11 +182,27 @@ public class ApprovalController : ControllerBase
         request.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
 
-        await _notify.NotifyUserAsync(request.EmployeeId, approverId, "TravelRequest",
+        // ── SignalR push (existing) ────────────────────────────────────────────
+        await _notify.NotifyUserAsync(
+            request.EmployeeId, approverId, "TravelRequest",
             $"Travel Request {(action == "approve" ? "Approved ✅" : "Rejected ❌")}",
             $"Your request {request.RequestCode} ({request.Destination}) has been {request.Status.ToLower()}." +
             (dto.Comments != null ? $" Remarks: {dto.Comments}" : ""),
             requestId: request.RequestId);
+
+        // ── Status update email (non-blocking) ────────────────────────────────
+        var employeeSnapshot = request.Employee;           // already loaded via Include
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _email.SendStatusUpdateEmailAsync(request, employeeSnapshot, dto.Comments);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[Email] Status update failed for {request.RequestCode}: {ex.Message}");
+            }
+        });
 
         return Ok(new { request.RequestId, request.RequestCode, request.Status });
     }
@@ -205,6 +224,7 @@ public class ApprovalController : ControllerBase
                 CreatedAt    = a.CreatedAt,
             })
             .ToListAsync();
+
         return Ok(rows);
     }
 }
