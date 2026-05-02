@@ -41,3 +41,5 @@ pnpm-debug.log*
 
 # ── Misc
 *.swp
+.dotnet-cli/
+BgaussTravel.API/wwwroot/uploads/
