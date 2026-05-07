@@ -100,13 +100,18 @@ public partial class AppDbContext : DbContext
 
             entity.HasIndex(e => e.Email, "UQ__TravelEm__A9D10534B9E4012C").IsUnique();
 
+            entity.Property(e => e.AlternateEmail).HasMaxLength(150);
+            entity.Property(e => e.ContactNumber).HasMaxLength(30);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getutcdate())");
             entity.Property(e => e.Department).HasMaxLength(128);
+            entity.Property(e => e.Designation).HasMaxLength(120);
             entity.Property(e => e.DisplayName).HasMaxLength(256);
             entity.Property(e => e.Email).HasMaxLength(256);
+            entity.Property(e => e.EmergencyContact).HasMaxLength(150);
             entity.Property(e => e.EmployeeCode).HasMaxLength(64);
             entity.Property(e => e.IsActive).HasDefaultValue(true);
             entity.Property(e => e.MicrosoftOid).HasMaxLength(128);
+            entity.Property(e => e.ReportingManager).HasMaxLength(120);
             entity.Property(e => e.Role)
                 .HasMaxLength(32)
                 .HasDefaultValue("Employee");

@@ -1,0 +1,36 @@
+/* src/styles/navbar-override.css
+   Import this in main.tsx / index.css to ensure navbar renders correctly on ALL pages.
+   It overrides any page-level styles that might conflict with the sticky navbar. */
+
+/* ── Reset any page body padding that could shift the navbar ── */
+body {
+  margin: 0;
+  padding: 0;
+}
+
+/* ── Ensure the navbar always sits on top of everything ── */
+header[class*="navbar"] {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  height: 56px !important;
+  z-index: 500 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  padding: 0 20px !important;
+  background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%) !important;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3) !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+
+/* ── All pages: push main content below fixed navbar ── */
+main {
+  padding-top: 56px;
+}
+
+/* ── Pages that use padding on their own main — respect their extra offset ── */
+/* (ExpenseSubmitPage, ReportsPage, etc. use padding: "80px 20px 60px") */
+/* Their inline styles already account for this, so no override needed here. */

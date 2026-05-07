@@ -64,7 +64,7 @@ const REQUEST_PAGE_CONFIG = {
     icon: "✈️", title: "Flight Booking Request",
     subtitle: "Raise an air travel request for domestic or international business movement.",
     routeLabel: "Flight", transportType: "Flight",
-    fieldLabels: { from: "Departure Airport", to: "Arrival Airport",
+    fieldLabels: { from: "Departure Airport(From)", to: "Arrival Airport(To)",
       date1: "Departure Date", date2: "Return Date",
       option1: "Trip Type", option2: "Cabin Class" },
     fromSuggestions: AIRPORTS,
@@ -84,7 +84,7 @@ const REQUEST_PAGE_CONFIG = {
     icon: "🚆", title: "Train Booking Request",
     subtitle: "Raise a rail booking request for intercity official travel.",
     routeLabel: "Train", transportType: "Train",
-    fieldLabels: { from: "Boarding Station", to: "Destination Station",
+    fieldLabels: { from: "Boarding Station(From)", to: "Destination Station(To)",
       date1: "Journey Date", date2: "Return Date",
       option1: "Journey Type", option2: "Coach Class" },
     fromSuggestions: TRAIN_STATIONS,
@@ -107,7 +107,7 @@ const REQUEST_PAGE_CONFIG = {
     icon: "🚌", title: "Bus Booking Request",
     subtitle: "Raise a request for intercity bus travel on official work.",
     routeLabel: "Bus", transportType: "Bus",
-    fieldLabels: { from: "Boarding Bus Stand", to: "Destination Bus Stand",
+    fieldLabels: { from: "Boarding Bus Stand(From)", to: "Destination Bus Stand(To)",
       date1: "Journey Date", date2: "Return Date",
       option1: "Journey Type", option2: "Bus Type" },
     fromSuggestions: BUS_STANDS,
@@ -126,7 +126,7 @@ const REQUEST_PAGE_CONFIG = {
     icon: "🚕", title: "Cab Booking Request",
     subtitle: "Raise a request for office visits, airport transfers, or local business travel.",
     routeLabel: "Cab", transportType: "Cab",
-    fieldLabels: { from: "Pickup Location", to: "Drop Location",
+    fieldLabels: { from: "Pickup Location(From)", to: "Drop Location(To)",
       date1: "Travel Date", date2: "Return Date",
       option1: "Trip Type", option2: "Cab Type" },
     fromSuggestions: INDIAN_CITIES,
@@ -145,7 +145,7 @@ const REQUEST_PAGE_CONFIG = {
     icon: "🏨", title: "Hotel Booking Request",
     subtitle: "Raise an accommodation request for approved overnight travel and events.",
     routeLabel: "Hotel", transportType: "Hotel",
-    fieldLabels: { from: "City of Stay", to: "Preferred Area/Property", 
+    fieldLabels: { from: "City of Stay(From)", to: "Preferred Area/Property(To)", 
     date1: "Check-in Date", date2: "Check-out Date", option1: "Room Type", option2: "Stay Category" },
     fromSuggestions: INDIAN_CITIES,
     toSuggestions:   [] as string[],
@@ -415,13 +415,13 @@ export default function TravelRequestFormPage() {
                     required />
                 </label>
 
-                <label className={`${styles.field} ${styles.fieldWide}`}>
+                {/* <label className={`${styles.field} ${styles.fieldWide}`}>
                   <span className={styles.label}>Additional Notes</span>
                   <textarea className={`${styles.input} ${styles.textarea}`}
                     name="notes" value={form.notes}
                     onChange={handleChange} rows={2}
                     placeholder="Vendor preferences, reporting time, event details, approval references…" />
-                </label>
+                </label> */}
 
               </div>
 

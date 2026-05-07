@@ -20,12 +20,13 @@
   background: var(--bg);
   font-family: 'Barlow', system-ui, sans-serif;
   color: var(--text);
+  padding-top: 60px; /* ← add this if navbar is fixed */
 }
 
 .main {
   width: min(1440px, 100%);
   margin: 0 auto;
-  padding: 20px clamp(16px, 2vw, 28px) 32px;
+  padding: 10px clamp(16px, 2vw, 28px) 32px; /* ← change 20px top → 72px */
   display: flex;
   flex-direction: column;
   gap: 18px;

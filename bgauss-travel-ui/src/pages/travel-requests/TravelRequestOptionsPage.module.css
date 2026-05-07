@@ -10,15 +10,16 @@
     linear-gradient(180deg, #f3f6fb 0%, #f8fafc 100%);
   font-family: 'Barlow', system-ui, sans-serif;
   color: #0f172a;
+  padding-top: 60px;
 }
 
 .main {
-  width: min(1320px, 100%);
+  width: min(1440px, 100%);
   margin: 0 auto;
-  padding: 20px clamp(16px, 2vw, 28px) 40px;
+  padding: 10px clamp(16px, 2vw, 28px) 32px; /* ← change 20px top → 72px */
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 18px;
   flex: 1;
 }
 

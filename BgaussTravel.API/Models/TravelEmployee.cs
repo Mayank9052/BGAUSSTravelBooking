@@ -25,6 +25,16 @@ public partial class TravelEmployee
 
     public DateTime? LastLoginAt { get; set; }
 
+    public string? Designation { get; set; }
+
+    public string? ReportingManager { get; set; }
+
+    public string? ContactNumber { get; set; }
+
+    public string? AlternateEmail { get; set; }
+
+    public string? EmergencyContact { get; set; }
+
     public virtual ICollection<ExpenseClaim> ExpenseClaimApprovedByNavigations { get; set; } = new List<ExpenseClaim>();
 
     public virtual ICollection<ExpenseClaim> ExpenseClaimEmployees { get; set; } = new List<ExpenseClaim>();

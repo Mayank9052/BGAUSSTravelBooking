@@ -25,10 +25,10 @@ export const notificationService = {
 
 export function buildNotificationConnection(): HubConnection {
   return new HubConnectionBuilder()
-    .withUrl("/hubs/travel", {
+    .withUrl("/hubs/notifications", {          // ← FIX: was "/hubs/travel", must match Program.cs MapHub
       accessTokenFactory: () => localStorage.getItem("jwt_token") ?? "",
     })
-    .withAutomaticReconnect()
+    .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])  // ← ADD: retry schedule prevents crash on disconnect
     .configureLogging(LogLevel.Warning)
     .build();
 }

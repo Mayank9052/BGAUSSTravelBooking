@@ -1,11 +1,13 @@
 // Controllers/ReportController.cs
 // FIXES:
-//  1. /api/Report/dashboard — now scoped by JWT role:
-//       Admin/HR → org-wide totals (all employees)
-//       Employee → only their own TravelRequests + ExpenseClaims
-//  2. /api/Report/my-transport — already employee-scoped (unchanged)
-//  3. /api/Report/by-transport — admin only (unchanged)
-//  4. by-employee / by-department — unchanged (admin only)
+//  1. /api/Report/dashboard — scoped by JWT role (Admin/HR = org-wide, Employee = own)
+//  2. Date filtering now uses DepartureDate / ReturnDate (DateOnly) for TravelRequests
+//     instead of CreatedAt — this ensures approved trips with expenses show up correctly
+//  3. /api/Report/by-transport — uses DepartureDate range
+//  4. /api/Report/my-transport — uses DepartureDate range
+//  5. /api/Report/by-employee — uses ExpenseClaim.ExpenseDate (already DateOnly)
+//  6. /api/Report/by-department — uses DepartureDate range
+//  7. Multiple ExpenseClaims per TravelRequest all included (no category-match filter)
 
 using BgaussTravel.API.Data;
 using BgaussTravel.API.DTOs;
@@ -61,6 +63,7 @@ public class ReportController : ControllerBase
     // ── GET /api/Report/dashboard ─────────────────────────────────────────────
     // Admin/HR → org-wide sums
     // Employee → only their own requests and expense claims
+    // Date filter: TravelRequests by DepartureDate, ExpenseClaims by ExpenseDate
     [HttpGet("dashboard")]
     public async Task<IActionResult> Dashboard([FromQuery] DateTime? from, [FromQuery] DateTime? to)
     {
@@ -70,16 +73,19 @@ public class ReportController : ControllerBase
         var start = from ?? DateTime.UtcNow.AddMonths(-1);
         var end   = to   ?? DateTime.UtcNow;
 
+        // Convert to DateOnly for DepartureDate / ExpenseDate filtering
         var startDate = DateOnly.FromDateTime(start);
         var endDate   = DateOnly.FromDateTime(end);
 
         var adminMode = IsAdminOrHr();
 
-        // ── Request counts ────────────────────────────────────────────────────
+        // ── TravelRequest counts filtered by DepartureDate ────────────────────
+        // Using DepartureDate (DateOnly) so approved trips in the travel window appear
         var reqQuery = adminMode
-            ? _db.TravelRequests.Where(r => r.CreatedAt >= start && r.CreatedAt <= end)
-            : _db.TravelRequests.Where(r => r.EmployeeId == empId && r.CreatedAt >= start && r.CreatedAt <= end);
+            ? _db.TravelRequests.Where(r => r.DepartureDate >= startDate && r.DepartureDate <= endDate)
+            : _db.TravelRequests.Where(r => r.EmployeeId == empId && r.DepartureDate >= startDate && r.DepartureDate <= endDate);
 
+        // All-time status counts (not date-limited) for pending/approved/rejected totals
         var allReqQuery = adminMode
             ? _db.TravelRequests.AsQueryable()
             : _db.TravelRequests.Where(r => r.EmployeeId == empId);
@@ -89,7 +95,7 @@ public class ReportController : ControllerBase
         var approvedRequests = await allReqQuery.CountAsync(r => r.Status == "Approved");
         var rejectedRequests = await allReqQuery.CountAsync(r => r.Status == "Rejected");
 
-        // ── Expense sums ──────────────────────────────────────────────────────
+        // ── Expense sums filtered by ExpenseDate ──────────────────────────────
         var expQuery = adminMode
             ? _db.ExpenseClaims.Where(e => e.ExpenseDate >= startDate && e.ExpenseDate <= endDate && e.Status != "Rejected")
             : _db.ExpenseClaims.Where(e => e.EmployeeId == empId && e.ExpenseDate >= startDate && e.ExpenseDate <= endDate && e.Status != "Rejected");
@@ -102,7 +108,6 @@ public class ReportController : ControllerBase
         var pendingExpenses  = await allExpQuery.Where(e => e.Status == "Submitted").SumAsync(e => (decimal?)e.Amount) ?? 0;
         var approvedExpenses = await allExpQuery.Where(e => e.Status == "Approved" || e.Status == "Reimbursed").SumAsync(e => (decimal?)e.Amount) ?? 0;
 
-        // TotalEmployees only makes sense for admin; for employees show their own team count (or 0)
         var totalEmployees = adminMode
             ? await _db.TravelEmployees.CountAsync(e => e.IsActive && e.Role == "Employee")
             : 0;
@@ -121,22 +126,31 @@ public class ReportController : ControllerBase
     }
 
     // ── GET /api/Report/by-transport (Admin — all employees) ─────────────────
-    // In ReportController.cs — fix by-transport
+    // Date filter: TravelRequest.DepartureDate (DateOnly)
+    // Expense sum: ALL ExpenseClaims linked to matching TravelRequests (no category filter)
     [HttpGet("by-transport")]
     public async Task<IActionResult> ByTransport([FromQuery] DateTime? from, [FromQuery] DateTime? to)
     {
         var start = from ?? DateTime.UtcNow.AddYears(-5);
         var end   = to   ?? DateTime.UtcNow;
 
-        // Get all requests in date range
+        // ✅ FIX: filter by DepartureDate (DateOnly) not CreatedAt
+        var startDate = DateOnly.FromDateTime(start);
+        var endDate   = DateOnly.FromDateTime(end);
+
+        // Get all requests in departure-date range
         var requests = await _db.TravelRequests
-            .Where(r => r.CreatedAt >= start && r.CreatedAt <= end)
+            .Where(r => r.DepartureDate >= startDate && r.DepartureDate <= endDate)
             .Select(r => new { r.RequestId, r.TransportType })
             .ToListAsync();
 
+        if (!requests.Any())
+            return Ok(Array.Empty<object>());
+
         var requestIds = requests.Select(r => r.RequestId).ToList();
 
-        // Sum expenses by requestId (not by category LIKE match)
+        // ✅ FIX: Sum ALL expenses for the request (no LIKE category filter)
+        // This picks up all expense rows submitted under the same TravelRequest
         var expensesByRequest = await _db.ExpenseClaims
             .Where(e => requestIds.Contains(e.RequestId) && e.Status != "Rejected")
             .GroupBy(e => e.RequestId)
@@ -148,17 +162,18 @@ public class ReportController : ControllerBase
         var data = requests
             .GroupBy(r => r.TransportType ?? "Unknown")
             .Select(g => new {
-                Transport   = g.Key,
-                Count       = g.Count(),
-                TotalAmount = g.Sum(r => expMap.TryGetValue(r.RequestId, out var amt) ? amt : 0m),
+                transport   = g.Key,
+                count       = g.Count(),
+                totalAmount = g.Sum(r => expMap.TryGetValue(r.RequestId, out var amt) ? amt : 0m),
             })
-            .OrderByDescending(x => x.Count)
+            .OrderByDescending(x => x.count)
             .ToList();
 
         return Ok(data);
     }
 
     // ── GET /api/Report/my-transport (Employee — own trips only) ─────────────
+    // Date filter: TravelRequest.DepartureDate (DateOnly)
     [HttpGet("my-transport")]
     public async Task<IActionResult> MyTransport([FromQuery] DateTime? from, [FromQuery] DateTime? to)
     {
@@ -169,39 +184,60 @@ public class ReportController : ControllerBase
         var start = from ?? DateTime.UtcNow.AddYears(-5);
         var end   = to   ?? DateTime.UtcNow;
 
-        var data = await (
-            from r in _db.TravelRequests
-            join e in _db.ExpenseClaims
-                on r.RequestId equals e.RequestId into expGroup
-            from e in expGroup.DefaultIfEmpty() // LEFT JOIN
-            where r.EmployeeId == empId
-                && r.CreatedAt >= start
-                && r.CreatedAt <= end
-            group new { r, e } by r.TransportType into g
-            select new
-            {
-                Transport = g.Key ?? "Unknown",
-                Count = g.Select(x => x.r.RequestId).Distinct().Count(),
+        // ✅ FIX: filter by DepartureDate (DateOnly)
+        var startDate = DateOnly.FromDateTime(start);
+        var endDate   = DateOnly.FromDateTime(end);
 
-                // ✅ Sum from ExpenseClaims
-                TotalAmount = g.Sum(x => (decimal?)x.e.Amount) ?? 0
-            }
-        )
-        .OrderByDescending(x => x.Count)
-        .ToListAsync();
+        // Pull employee's requests in range, then join all their expense claims
+        var requests = await _db.TravelRequests
+            .Where(r => r.EmployeeId == empId
+                     && r.DepartureDate >= startDate
+                     && r.DepartureDate <= endDate)
+            .Select(r => new { r.RequestId, r.TransportType })
+            .ToListAsync();
+
+        if (!requests.Any())
+            return Ok(Array.Empty<object>());
+
+        var requestIds = requests.Select(r => r.RequestId).ToList();
+
+        // ✅ FIX: ALL expense claims for these requests, no category filter
+        var expensesByRequest = await _db.ExpenseClaims
+            .Where(e => requestIds.Contains(e.RequestId) && e.Status != "Rejected")
+            .GroupBy(e => e.RequestId)
+            .Select(g => new { RequestId = g.Key, Total = g.Sum(e => e.Amount) })
+            .ToListAsync();
+
+        var expMap = expensesByRequest.ToDictionary(e => e.RequestId, e => e.Total);
+
+        var data = requests
+            .GroupBy(r => r.TransportType ?? "Unknown")
+            .Select(g => new {
+                transport   = g.Key,
+                count       = g.Count(),
+                totalAmount = g.Sum(r => expMap.TryGetValue(r.RequestId, out var amt) ? amt : 0m),
+            })
+            .OrderByDescending(x => x.count)
+            .ToList();
 
         return Ok(data);
     }
 
     // ── GET /api/Report/by-employee (Admin only) ──────────────────────────────
+    // Groups expense claims by employee.
+    // Date filter on ExpenseClaim.ExpenseDate (DateOnly)
     [HttpGet("by-employee")]
     public async Task<IActionResult> ByEmployee([FromQuery] DateTime? from, [FromQuery] DateTime? to)
     {
         var start = from ?? DateTime.UtcNow.AddMonths(-3);
         var end   = to   ?? DateTime.UtcNow;
 
-        // Group expense claims by EmployeeId (never null)
+        var startDate = DateOnly.FromDateTime(start);
+        var endDate   = DateOnly.FromDateTime(end);
+
+        // ✅ FIX: Apply date filter on ExpenseDate so recent expenses appear
         var claimGroups = await _db.ExpenseClaims
+            .Where(e => e.ExpenseDate >= startDate && e.ExpenseDate <= endDate)
             .GroupBy(e => e.EmployeeId)
             .Select(g => new
             {
@@ -247,57 +283,59 @@ public class ReportController : ControllerBase
     }
 
     // ── GET /api/Report/by-department (Admin only) ────────────────────────────
+    // Date filter: TravelRequest.DepartureDate (DateOnly)
+    // expenseTotal = sum of all ExpenseClaims linked to requests in that dept & date range
     [HttpGet("by-department")]
     public async Task<IActionResult> ByDepartment([FromQuery] DateTime? from, [FromQuery] DateTime? to)
     {
         var start = from ?? DateTime.UtcNow.AddYears(-1);
         var end   = to   ?? DateTime.UtcNow;
 
-        // ✅ FIX conversion
-        var startDateOnly = DateOnly.FromDateTime(start);
-        var endDateOnly   = DateOnly.FromDateTime(end);
+        // ✅ FIX: use DepartureDate (DateOnly) for the travel-request window
+        var startDate = DateOnly.FromDateTime(start);
+        var endDate   = DateOnly.FromDateTime(end);
 
-        var data = await (
-            from r in _db.TravelRequests
-            join e in _db.ExpenseClaims
-                on r.RequestId equals e.RequestId into re
-            from e in re.DefaultIfEmpty()
-
-            where r.CreatedAt >= start && r.CreatedAt <= end
-
-            let department =
-                !string.IsNullOrEmpty(r.Department)
-                    ? r.Department
-                    : (r.Employee != null && !string.IsNullOrEmpty(r.Employee.Department))
-                        ? r.Employee.Department
-                        : "Unknown"
-
-            select new
+        // Pull requests in departure window
+        var requests = await _db.TravelRequests
+            .Where(r => r.DepartureDate >= startDate && r.DepartureDate <= endDate)
+            .Select(r => new
             {
                 r.RequestId,
-                Department = department,
-                RequestStatus = r.Status,
+                r.Status,
+                Department = !string.IsNullOrEmpty(r.Department)
+                    ? r.Department
+                    : (r.Employee != null && !string.IsNullOrEmpty(r.Employee.Department)
+                        ? r.Employee.Department
+                        : "Unknown"),
+            })
+            .ToListAsync();
 
-                // ✅ FIXED comparison
-                Amount = (e != null
-                        && e.Status != "Rejected"
-                        && e.ExpenseDate >= startDateOnly
-                        && e.ExpenseDate <= endDateOnly)
-                            ? e.Amount
-                            : 0
-            }
-        )
-        .GroupBy(x => x.Department)
-        .Select(g => new
-        {
-            department = g.Key,
-            requestCount = g.Select(x => x.RequestId).Distinct().Count(),
-            approved = g.Count(x => x.RequestStatus == "Approved"),
-            pending  = g.Count(x => x.RequestStatus == "Submitted" || x.RequestStatus == "UnderReview"),
-            expenseTotal = g.Sum(x => (decimal?)x.Amount) ?? 0
-        })
-        .OrderByDescending(x => x.requestCount)
-        .ToListAsync();
+        if (!requests.Any())
+            return Ok(Array.Empty<object>());
+
+        var requestIds = requests.Select(r => r.RequestId).ToList();
+
+        // ✅ FIX: sum ALL expense claims for these requests (no category filter)
+        var expensesByRequest = await _db.ExpenseClaims
+            .Where(e => requestIds.Contains(e.RequestId) && e.Status != "Rejected")
+            .GroupBy(e => e.RequestId)
+            .Select(g => new { RequestId = g.Key, Total = g.Sum(e => e.Amount) })
+            .ToListAsync();
+
+        var expMap = expensesByRequest.ToDictionary(e => e.RequestId, e => e.Total);
+
+        var data = requests
+            .GroupBy(r => r.Department)
+            .Select(g => new
+            {
+                department   = g.Key,
+                requestCount = g.Count(),
+                approved     = g.Count(r => r.Status == "Approved"),
+                pending      = g.Count(r => r.Status == "Submitted" || r.Status == "UnderReview"),
+                expenseTotal = g.Sum(r => expMap.TryGetValue(r.RequestId, out var amt) ? amt : 0m),
+            })
+            .OrderByDescending(x => x.requestCount)
+            .ToList();
 
         return Ok(data);
     }

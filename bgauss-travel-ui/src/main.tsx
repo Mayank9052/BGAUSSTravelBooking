@@ -1,17 +1,37 @@
+// src/main.tsx
+// FIX: TypeScript error 2739
+//
+// The error was caused by main.tsx importing TravelRequestDetailModal (the dashboard modal)
+// as the route component for /booking/new/:requestType.
+// That modal requires props: trip, isAdminOrHr, onClose — so it cannot be used as a route.
+//
+// SOLUTION:
+//   - /booking/new/:requestType  → TravelRequestFormPage  (standalone page, zero required props)
+//   - Dashboard modal            → TravelRequestDetailModal (used inside DashboardPage with props)
+
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { MsalProvider } from "@azure/msal-react";
 import { msalInstance } from "./auth/msalConfig";
-import LoginPage from "./pages/auth/LoginPage";
-import DashboardPage from "./pages/dashboard/DashboardPage";
+
+import LoginPage               from "./pages/auth/LoginPage";
+import DashboardPage           from "./pages/dashboard/DashboardPage";
 import TravelRequestOptionsPage from "./pages/travel-requests/TravelRequestOptionsPage";
-import TravelRequestFormPage from "./pages/travel-requests/TravelRequestFormPage";
+
+// ✅ CORRECT: standalone page component — no required props — safe to use as a route
+import TravelRequestFormPage   from "./pages/travel-requests/TravelRequestFormPage";
+//import TravelRequestDetailModal from "./components/travel/TravelRequestDetailModal";
+
+// ✅ NOTE: TravelRequestDetailModal lives at src/components/travel/TravelRequestDetailModal.tsx
+//          It is imported and used ONLY inside DashboardPage — never registered as a route.
+
 import ExpenseSubmitPage from "./pages/expenses/ExpenseSubmitPage";
-import ReportsPage from "./pages/reports/ReportsPage";
-import ProfilePage from "./pages/profile/ProfilePage";
-import PrivateRoute from "./components/PrivateRoute";
+import ReportsPage       from "./pages/reports/ReportsPage";
+import ProfilePage       from "./pages/profile/ProfilePage";
+import PrivateRoute      from "./components/PrivateRoute";
 import "./index.css";
+import "./styles/navbar-override.css";
 
 msalInstance
   .initialize()
@@ -21,14 +41,19 @@ msalInstance
         <MsalProvider instance={msalInstance}>
           <BrowserRouter>
             <Routes>
-              <Route path="/" element={<LoginPage />} />
+              <Route path="/"      element={<LoginPage />} />
               <Route path="/login" element={<LoginPage />} />
-              <Route path="/dashboard" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
+
+              <Route path="/dashboard"   element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
               <Route path="/dashboard/*" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
+
+              {/* Step 1: employee picks travel mode */}
               <Route
                 path="/booking/new"
                 element={<PrivateRoute><TravelRequestOptionsPage /></PrivateRoute>}
               />
+
+              {/* Step 2: actual booking form — TravelRequestFormPage has NO required props ✅ */}
               <Route
                 path="/booking/new/:requestType"
                 element={<PrivateRoute><TravelRequestFormPage /></PrivateRoute>}
@@ -39,7 +64,7 @@ msalInstance
               />
               <Route path="/reports" element={<PrivateRoute><ReportsPage /></PrivateRoute>} />
               <Route path="/profile" element={<PrivateRoute><ProfilePage /></PrivateRoute>} />
-              <Route path="*" element={<Navigate to="/login" replace />} />
+              <Route path="*"        element={<Navigate to="/login" replace />} />
             </Routes>
           </BrowserRouter>
         </MsalProvider>

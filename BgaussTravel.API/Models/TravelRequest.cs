@@ -41,7 +41,7 @@ public partial class TravelRequest
 
     public DateTime? LocationCapturedAt { get; set; }
 
-    public string Department { get; set; } = null!;
+    public string? Department { get; set; }
 
     public virtual TravelEmployee Employee { get; set; } = null!;
 

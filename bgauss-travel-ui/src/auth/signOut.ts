@@ -12,7 +12,7 @@ const APP_SESSION_KEYS = [
 
 export function signOutUser(): void {
   APP_SESSION_KEYS.forEach((key) => localStorage.removeItem(key));
-  localStorage.removeItem("user_city"); // added
+  //localStorage.removeItem("user_city"); // added
   msalInstance.setActiveAccount(null);
   window.location.replace("/login");
 }

@@ -1,8 +1,9 @@
 // src/components/layout/NotificationTabs.tsx
-// Fresh tab  = only items passed in `notifications` prop (unread from DashboardPage state)
-// History tab = all items passed in `allNotifications` prop that are isRead=true
-// When user clicks an item in Fresh → onMarkRead fires → DashboardPage removes it
-//   from freshNotifs and marks it read in allNotifs → Fresh tab clears, History grows
+// FIXED:
+//  1. Optimistic local dismissal — clicking "mark read" instantly removes the item
+//     from the Fresh tab without waiting for parent state to propagate
+//  2. Dismissed IDs are tracked in local state; merged with parent's isRead filter
+//     so History tab still grows correctly once parent catches up
 
 import { useState } from "react";
 
@@ -26,24 +27,24 @@ const fmtTime = (d: string) => {
     const date    = new Date(d);
     const diffMs  = Date.now() - date.getTime();
     const diffMin = Math.floor(diffMs / 60000);
-    if (diffMin < 1)   return "Just now";
-    if (diffMin < 60)  return `${diffMin}m ago`;
+    if (diffMin < 1)  return "Just now";
+    if (diffMin < 60) return `${diffMin}m ago`;
     const diffHr = Math.floor(diffMin / 60);
-    if (diffHr  < 24)  return `${diffHr}h ago`;
+    if (diffHr  < 24) return `${diffHr}h ago`;
     const diffDay = Math.floor(diffHr / 24);
-    if (diffDay < 7)   return `${diffDay}d ago`;
+    if (diffDay < 7)  return `${diffDay}d ago`;
     return date.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
   } catch { return ""; }
 };
 
 const notifIcon = (title: string) => {
   const t = title?.toLowerCase() ?? "";
-  if (t.includes("approved"))   return "✅";
-  if (t.includes("rejected"))   return "❌";
-  if (t.includes("submitted"))  return "📤";
-  if (t.includes("reimburse"))  return "💰";
-  if (t.includes("travel"))     return "✈️";
-  if (t.includes("expense"))    return "🧾";
+  if (t.includes("approved"))  return "✅";
+  if (t.includes("rejected"))  return "❌";
+  if (t.includes("submitted")) return "📤";
+  if (t.includes("reimburse")) return "💰";
+  if (t.includes("travel"))    return "✈️";
+  if (t.includes("expense"))   return "🧾";
   return "🔔";
 };
 
@@ -53,19 +54,32 @@ export function NotificationTabs({
   onMarkRead,
   onOpenHistory,
 }: NotificationTabsProps) {
-  const [tab, setTab] = useState<"fresh" | "history">("fresh");
+  const [tab, setTab]               = useState<"fresh" | "history">("fresh");
+  // IDs dismissed this session — gives instant visual feedback before parent re-renders
+  const [dismissedIds, setDismissedIds] = useState<Set<number>>(new Set());
 
-  // Fresh = whatever DashboardPage sends as `notifications` (already only unread)
-  const freshItems   = notifications;
-  // History = the read ones from allNotifications
-  const historyItems = allNotifications.filter(n => n.isRead);
+  const handleMarkRead = (id: number) => {
+    // 1. Instantly hide from Fresh tab
+    setDismissedIds(prev => new Set(prev).add(id));
+    // 2. Propagate to parent (updates unreadCount, moves to allNotifs, etc.)
+    onMarkRead(id);
+  };
+
+  // Fresh = parent's unread list minus anything we've already dismissed locally
+  const freshItems = notifications.filter(n => !dismissedIds.has(n.notificationId));
+
+  // History = items marked read by parent OR dismissed locally this session
+  const historyItems = allNotifications.filter(
+    n => n.isRead || dismissedIds.has(n.notificationId)
+  );
 
   return (
     <div>
       {/* ── Tab bar ── */}
       <div style={{ display: "flex", borderBottom: "1px solid #f1f5f9" }}>
         {(["fresh", "history"] as const).map(t => (
-          <button key={t}
+          <button
+            key={t}
             onClick={() => {
               setTab(t);
               if (t === "history") onOpenHistory?.();
@@ -77,7 +91,8 @@ export function NotificationTabs({
               color: tab === t ? "#3b82f6" : "#94a3b8",
               transition: "color 0.15s, border-color 0.15s",
               fontFamily: "inherit",
-            }}>
+            }}
+          >
             {t === "fresh"
               ? `Fresh${freshItems.length > 0 ? ` (${freshItems.length})` : ""}`
               : `History (${historyItems.length})`}
@@ -85,7 +100,7 @@ export function NotificationTabs({
         ))}
       </div>
 
-      {/* ── Fresh tab — unread notifications ── */}
+      {/* ── Fresh tab ── */}
       {tab === "fresh" && (
         <div style={{ maxHeight: 320, overflowY: "auto" }}>
           {freshItems.length === 0 ? (
@@ -97,7 +112,7 @@ export function NotificationTabs({
           ) : freshItems.map(n => (
             <div
               key={n.notificationId}
-              onClick={() => onMarkRead(n.notificationId)}
+              onClick={() => handleMarkRead(n.notificationId)}
               style={{
                 padding: "12px 16px", borderBottom: "1px solid #f1f5f9",
                 background: "#eff6ff", cursor: "pointer",
@@ -132,7 +147,7 @@ export function NotificationTabs({
         </div>
       )}
 
-      {/* ── History tab — already-read notifications ── */}
+      {/* ── History tab ── */}
       {tab === "history" && (
         <div style={{ maxHeight: 320, overflowY: "auto" }}>
           {historyItems.length === 0 ? (
