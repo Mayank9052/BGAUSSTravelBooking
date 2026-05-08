@@ -644,13 +644,13 @@ export default function ExpenseSubmitPage() {
               )}
             </div>
             {/* Top-level Add Row button still kept for convenience */}
-            <button onClick={addRow} disabled={!requestId} style={{
+            {/* <button onClick={addRow} disabled={!requestId} style={{
               padding: "6px 16px", background: requestId ? "#0f172a" : "#94a3b8",
               color: "#fff", border: "none", borderRadius: 8,
               fontWeight: 700, fontSize: 12, cursor: requestId ? "pointer" : "not-allowed",
             }}>
               + Add Expense Row
-            </button>
+            </button> */}
           </div>
 
           <div style={{ padding: "16px 24px", display: "flex", flexDirection: "column", gap: 20 }}>

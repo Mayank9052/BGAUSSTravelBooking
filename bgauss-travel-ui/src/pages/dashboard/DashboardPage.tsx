@@ -449,6 +449,138 @@ function TripCardWithHistory({
   );
 }
 
+// ── EmployeeExpenseList — shows employee's own claims with status filter ────────
+// ✅ FIX: This replaces the empty-state placeholder in the employee Expenses tab.
+//    It fetches all own claims from GET /Expense/my and filters by selected status.
+//    "Reimbursed" claims are now visible when clicking the Reimbursed stat card.
+function EmployeeExpenseList({
+  expenseStatusFilter, onClearFilter, navigate,
+}: {
+  expenseStatusFilter: string | null;
+  onClearFilter: () => void;
+  navigate: NavigateFunction;
+}) {
+  const [claims, setClaims] = useState<ExpenseClaimResponse[] | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    // Fetch ALL statuses — filter client-side so switching filter is instant
+    expenseService.getMy()
+      .then(setClaims)
+      .catch(() => setClaims([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const visibleClaims = claims
+    ? expenseStatusFilter
+      ? claims.filter(c => {
+          // "Submitted" in DB = "Pending" label in UI
+          if (expenseStatusFilter === "Submitted") return c.status === "Submitted";
+          return c.status === expenseStatusFilter;
+        })
+      : claims
+    : [];
+
+  const expenseBadge = (status: string): React.CSSProperties => ({
+    padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700,
+    background: status === "Approved" ? "#dcfce7" : status === "Rejected" ? "#fee2e2" : status === "Reimbursed" ? "#ede9fe" : "#fef3c7",
+    color: status === "Approved" ? "#15803d" : status === "Rejected" ? "#b91c1c" : status === "Reimbursed" ? "#6d28d9" : "#92400e",
+  });
+
+  if (loading) return (
+    <div style={{ padding: "20px 24px", color: "#94a3b8", fontSize: 13 }}>⏳ Loading expense claims…</div>
+  );
+
+  return (
+    <div style={{ padding: "0 24px 24px" }}>
+      {/* Filter chip */}
+      {expenseStatusFilter && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "#64748b" }}>Showing:</span>
+          <span style={{
+            padding: "3px 12px", borderRadius: 20, fontSize: 11, fontWeight: 700,
+            background: expenseStatusFilter === "Reimbursed" ? "#ede9fe" : expenseStatusFilter === "Approved" ? "#dcfce7" : expenseStatusFilter === "Rejected" ? "#fee2e2" : "#fef3c7",
+            color: expenseStatusFilter === "Reimbursed" ? "#6d28d9" : expenseStatusFilter === "Approved" ? "#15803d" : expenseStatusFilter === "Rejected" ? "#b91c1c" : "#92400e",
+          }}>
+            {expenseStatusFilter === "Submitted" ? "Pending" : expenseStatusFilter}
+          </span>
+          <button onClick={onClearFilter} style={{ background: "none", border: "none", color: "#3b82f6", cursor: "pointer", fontWeight: 700, fontSize: 11, padding: 0 }}>
+            ✕ clear
+          </button>
+          <span style={{ fontSize: 11, color: "#94a3b8" }}>({visibleClaims.length} of {claims?.length ?? 0})</span>
+        </div>
+      )}
+
+      {visibleClaims.length === 0 ? (
+        <div style={{ padding: "28px 0", textAlign: "center", color: "#94a3b8" }}>
+          <div style={{ fontSize: 28, marginBottom: 8 }}>🧾</div>
+          <p style={{ fontWeight: 700, color: "#64748b", margin: 0 }}>
+            {expenseStatusFilter
+              ? `No ${expenseStatusFilter === "Submitted" ? "pending" : expenseStatusFilter.toLowerCase()} claims`
+              : "No expense claims yet"}
+          </p>
+          {expenseStatusFilter && (
+            <button onClick={onClearFilter} style={{ marginTop: 8, background: "none", border: "none", color: "#3b82f6", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>
+              Show all claims
+            </button>
+          )}
+          {!expenseStatusFilter && (
+            <button className={styles.btnPrimary} style={{ marginTop: 12 }} onClick={() => navigate("/expense/submit")}>
+              Submit New Expense
+            </button>
+          )}
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {visibleClaims.map(claim => (
+            <div key={claim.claimId} style={{
+              display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10,
+              padding: "10px 14px", background: "#f8fafc", borderRadius: 10,
+              border: "1px solid #e2e8f0", fontSize: 12,
+            }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontWeight: 700, color: "#0f172a", fontSize: 13 }}>{claim.category}</div>
+                <div style={{ color: "#94a3b8", fontSize: 11, marginTop: 2 }}>
+                  {claim.claimCode}
+                  {claim.requestId ? ` · ${claim.requestId}` : ""}
+                  {" · "}
+                  {claim.expenseDate
+                    ? new Date(claim.expenseDate as unknown as string).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" })
+                    : "—"}
+                </div>
+                {claim.description && (
+                  <div style={{ color: "#64748b", fontSize: 11, marginTop: 1, fontStyle: "italic" }}>
+                    {claim.description.length > 60 ? claim.description.slice(0, 60) + "…" : claim.description}
+                  </div>
+                )}
+              </div>
+              <div style={{ fontWeight: 800, color: "#0f172a", fontSize: 14, whiteSpace: "nowrap" }}>
+                ₹{claim.amount.toLocaleString("en-IN")}
+              </div>
+              <span style={expenseBadge(claim.status)}>{claim.status}</span>
+              {claim.billPath && (
+                <a href={claim.billPath} target="_blank" rel="noreferrer"
+                  style={{ fontSize: 11, color: "#3b82f6", fontWeight: 600, textDecoration: "none" }}>
+                  {/\.pdf$/i.test(claim.billPath) ? "📄 View PDF" : "🖼️ View Bill"}
+                </a>
+              )}
+            </div>
+          ))}
+          {/* Submit more button at bottom */}
+          <div style={{ textAlign: "center", paddingTop: 8 }}>
+            <button
+              onClick={() => navigate("/expense/submit")}
+              style={{ padding: "7px 20px", background: "#0f172a", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+              + Submit New Expense
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── MAIN COMPONENT ────────────────────────────────────────────────────────────
 export default function DashboardPage() {
   // ✅ FIX 1: Use NavigateFunction type — no cast needed
@@ -495,6 +627,8 @@ export default function DashboardPage() {
   const [detailTrip,            setDetailTrip]            = useState<TravelRequestResponse | null>(null);
   const [showProfileModal,      setShowProfileModal]      = useState(false);
   const [statusFilter,          setStatusFilter]          = useState<StatFilter | null>(null);
+  // ✅ FIX: separate filter for expense claims (Reimbursed card → show reimbursed claims)
+  const [expenseStatusFilter,   setExpenseStatusFilter]   = useState<string | null>(null);
 
   const hasFetched = useRef(false);
   const signalRRef = useRef<HubConnection | null>(null);
@@ -514,26 +648,26 @@ export default function DashboardPage() {
       // ✅ Sync employee profile from API so all localStorage fields are always fresh.
       // This ensures TravelRequestOptionsPage disabled fields always show correct values
       // (designation, reportingManager, contactNumber) without needing a manual update first.
-      const employeeId = localStorage.getItem("employee_id");
-      if (employeeId) {
-        try {
-          const profile = await get<{
-            employeeId?: number; employeeCode?: string; fullName?: string;
-            department?: string; designation?: string; reportingManager?: string;
-            contactNumber?: string; email?: string; role?: string;
-          }>(`/Employee/${employeeId}`);
-          if (profile) {
-            if (profile.fullName)         localStorage.setItem("full_name",         profile.fullName);
-            if (profile.department)       localStorage.setItem("department",        profile.department);
-            if (profile.designation)      localStorage.setItem("designation",       profile.designation);
-            if (profile.reportingManager) localStorage.setItem("reporting_manager", profile.reportingManager);
-            if (profile.contactNumber)    localStorage.setItem("contact_number",    profile.contactNumber);
-            if (profile.email)            localStorage.setItem("email",             profile.email);
-            if (profile.role)             localStorage.setItem("role",              profile.role);
-            if (profile.employeeCode)     localStorage.setItem("employee_code",     profile.employeeCode);
-          }
-        } catch { /* profile sync failed — use existing localStorage as fallback */ }
-      }
+      try {
+        // ✅ Use the correct endpoint: GET /api/TravelEmployee/my-profile
+        // This reads the JWT token from the Authorization header (no employee_id needed in URL).
+        // Always write ALL fields — including empty strings — so stale values are always cleared.
+        const profile = await get<{
+          employeeId?: number; employeeCode?: string; displayName?: string;
+          department?: string; designation?: string; reportingManager?: string;
+          contactNumber?: string; email?: string; role?: string;
+        }>("/TravelEmployee/my-profile");
+        if (profile) {
+          localStorage.setItem("full_name",         profile.displayName      ?? "");
+          localStorage.setItem("department",        profile.department       ?? "");
+          localStorage.setItem("designation",       profile.designation      ?? "");
+          localStorage.setItem("reporting_manager", profile.reportingManager ?? "");
+          localStorage.setItem("contact_number",    profile.contactNumber    ?? "");
+          localStorage.setItem("email",             profile.email            ?? "");
+          localStorage.setItem("role",              profile.role             ?? "");
+          localStorage.setItem("employee_code",     profile.employeeCode     ?? "");
+        }
+      } catch { /* profile sync failed — existing localStorage values used as fallback */ }
 
       const [trRes, sumRes, notifRes] = await Promise.allSettled([
         bookingService.getMy(),
@@ -737,7 +871,9 @@ export default function DashboardPage() {
     { label: "Total Trips",   value: loading ? "—" : String(trips.length),        color: styles.statBlue,   icon: "✈️", chart: trips.length > 0 ? [1, 2, trips.length] : [], filter: "all" },
     { label: "Approved",      value: loading ? "—" : String(myApprovedCount),      color: styles.statGreen,  icon: "✅", chart: myApprovedCount > 0 ? [myApprovedCount] : [],   filter: "Approved" },
     { label: "Pending Trips", value: loading ? "—" : String(myPendingCount),       color: styles.statAmber,  icon: "⏳", chart: [],                                             filter: "Pending" },
-    { label: "Reimbursed",    value: loading ? "—" : `₹${((summary?.totalReimbursed ?? 0) / 1000).toFixed(1)}K`, color: styles.statPurple, icon: "💰", chart: [], filter: "Reimbursed" },
+    // ✅ FIX: "Reimbursed" is an ExpenseClaim status, not a TravelRequest status.
+    // Clicking this card switches to the Expenses tab and shows reimbursed claims there.
+    { label: "Reimbursed",    value: loading ? "—" : `₹${((summary?.totalReimbursed ?? 0) / 1000).toFixed(1)}K`, color: styles.statPurple, icon: "💰", chart: [], filter: "all", action: () => { setActiveTab("expenses"); setExpenseStatusFilter("Reimbursed"); } },
   ];
 
   const adminStatCards: { label: string; value: string; color: string; icon: string; chart: number[]; filter: StatFilter; action?: () => void }[] = [
@@ -947,26 +1083,31 @@ export default function DashboardPage() {
               {!isAdminOrHr && <button className={styles.btnOutline} onClick={() => navigate("/expense/submit")}>+ Submit Expense</button>}
             </div>
             {!isAdminOrHr && (<>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 12, padding: "20px 24px" }}>
+              {/* ✅ FIX: Clickable status mini-cards — clicking filters the expense list below */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 12, padding: "20px 24px 12px" }}>
                 {[
-                  { label: "Pending",    val: summary?.pendingCount    ?? 0, amt: summary?.totalPending    ?? 0, color: "#f59e0b" },
-                  { label: "Approved",   val: summary?.approvedCount   ?? 0, amt: summary?.totalApproved   ?? 0, color: "#22c55e" },
-                  { label: "Rejected",   val: summary?.rejectedCount   ?? 0, amt: 0,                            color: "#ef4444" },
-                  { label: "Reimbursed", val: summary?.reimbursedCount ?? 0, amt: summary?.totalReimbursed ?? 0, color: "#8b5cf6" },
+                  { label: "Pending",    val: summary?.pendingCount    ?? 0, amt: summary?.totalPending    ?? 0, color: "#f59e0b", status: "Submitted" },
+                  { label: "Approved",   val: summary?.approvedCount   ?? 0, amt: summary?.totalApproved   ?? 0, color: "#22c55e", status: "Approved" },
+                  { label: "Rejected",   val: summary?.rejectedCount   ?? 0, amt: 0,                            color: "#ef4444", status: "Rejected" },
+                  { label: "Reimbursed", val: summary?.reimbursedCount ?? 0, amt: summary?.totalReimbursed ?? 0, color: "#8b5cf6", status: "Reimbursed" },
                 ].map(e => (
-                  <div key={e.label} style={{ background: "#f8fafc", borderRadius: 12, padding: "14px 16px", border: `1.5px solid ${e.color}22` }}>
+                  <div key={e.label}
+                    onClick={() => setExpenseStatusFilter(prev => prev === e.status ? null : e.status)}
+                    style={{ background: expenseStatusFilter === e.status ? e.color + "18" : "#f8fafc", borderRadius: 12, padding: "14px 16px", border: `1.5px solid ${expenseStatusFilter === e.status ? e.color : e.color + "22"}`, cursor: "pointer", transition: "all 0.15s" }}>
                     <div style={{ fontSize: 22, fontWeight: 900, color: e.color }}>{e.val}</div>
                     <div style={{ fontSize: 12, fontWeight: 600, color: "#64748b" }}>{e.label}</div>
                     {e.amt > 0 && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>₹{(e.amt / 1000).toFixed(1)}K</div>}
+                    {expenseStatusFilter === e.status && <div style={{ fontSize: 9, fontWeight: 800, color: e.color, marginTop: 4 }}>filtered ✕</div>}
                   </div>
                 ))}
               </div>
-              <div className={styles.emptyState} style={{ paddingTop: 16, paddingBottom: 32 }}>
-                <div className={styles.emptyIcon}>🧾</div>
-                <p className={styles.emptyTitle}>Expense history</p>
-                <p className={styles.emptySub}>Upload bills and track reimbursements.</p>
-                <button className={styles.btnPrimary} style={{ marginTop: 12 }} onClick={() => navigate("/expense/submit")}>Submit New Expense</button>
-              </div>
+
+              {/* ✅ FIX: Show actual expense claims list filtered by selected status */}
+              <EmployeeExpenseList
+                expenseStatusFilter={expenseStatusFilter}
+                onClearFilter={() => setExpenseStatusFilter(null)}
+                navigate={navigate}
+              />
             </>)}
             {isAdminOrHr && (<>
               <div style={{ padding: "16px 24px 0" }}>
