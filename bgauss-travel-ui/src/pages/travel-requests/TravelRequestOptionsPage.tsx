@@ -1,9 +1,8 @@
 // src/pages/travel-requests/TravelRequestOptionsPage.tsx
-// FIX: Disabled fields now always show correct DB values on first load.
-//      Employee profile data (designation, reportingManager, contactNumber) is read
-//      directly from localStorage using the exact keys saved by useMsalLogin + the
-//      profile sync added in DashboardPage.loadDashboard.
-//      No manual dashboard update is needed — data is always fresh.
+// FIXES:
+//  1. Department is now a disabled text INPUT (not a dropdown) — shows DB value directly
+//  2. Profile is read from localStorage immediately — no async delay on first render
+//  3. readProfileFromStorage() used as single source of truth
 
 import { useState, type ChangeEvent, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
@@ -15,13 +14,6 @@ import {
   type EditableEmployeeDetails,
 } from "../../utils/sessionUser";
 import styles from "./TravelRequestOptionsPage.module.css";
-
-const DEPARTMENTS = [
-  "Branding and Marketing","Sales","Production","Finance and Legal","Logistic and Store Mgt",
-  "Quality","Service","CBD","Research and Development EE","Development","HR and Admin","SCM",
-  "Research and Development VI","Research and Development MD","Operation","B2B Sales","IT",
-  "B2B Service","Maintenance","Customer Care","Strategic Business",
-];
 
 const REQUEST_OPTIONS = [
   { id: "flight", icon: "✈️", title: "Flight Request",
@@ -43,24 +35,20 @@ const REQUEST_OPTIONS = [
 
 type RequestOptionId = (typeof REQUEST_OPTIONS)[number]["id"];
 
-// ✅ Read ALL fields directly from localStorage using the exact keys written by
-//    useMsalLogin.ts and the profile-sync in DashboardPage.loadDashboard.
-//    This bypasses any stale or incomplete getSessionUserProfile() mapping.
+// ── Read ALL fields directly from localStorage using exact keys ───────────────
+// Keys written by useMsalLogin.ts and the profile sync in DashboardPage.loadDashboard
 function readProfileFromStorage(): EditableEmployeeDetails {
   return {
-    employeeId:       localStorage.getItem("employee_code") ?? "",   // employee_code = "EMP001" style id
-    fullName:         localStorage.getItem("full_name")     ?? "",
-    department:       localStorage.getItem("department")    ?? "",
-    designation:      localStorage.getItem("designation")   ?? "",
-    // ✅ Key is "reporting_manager" (with underscore) — matches useMsalLogin save
-    reportingManager: localStorage.getItem("reporting_manager") ?? "",
-    // ✅ Key is "contact_number" (with underscore) — matches useMsalLogin save
-    contactNumber:    localStorage.getItem("contact_number") ?? "",
-    email:            localStorage.getItem("email")          ?? "",
+    employeeId:       localStorage.getItem("employee_code")      ?? "",
+    fullName:         localStorage.getItem("full_name")          ?? "",
+    department:       localStorage.getItem("department")         ?? "",
+    designation:      localStorage.getItem("designation")        ?? "",
+    reportingManager: localStorage.getItem("reporting_manager")  ?? "",
+    contactNumber:    localStorage.getItem("contact_number")     ?? "",
+    email:            localStorage.getItem("email")              ?? "",
   };
 }
 
-// Shared disabled field style — applied to all pre-filled inputs/selects
 const disabledFieldStyle: React.CSSProperties = {
   opacity: 0.65,
   cursor: "not-allowed",
@@ -76,13 +64,14 @@ export default function TravelRequestOptionsPage() {
   const [formError,      setFormError]      = useState<string | null>(null);
   const [showAllOptions, setShowAllOptions] = useState(true);
 
-  // ✅ Initialise from localStorage directly so fields show DB values immediately.
-  //    Falls back to getSessionUserProfile() for any field that's still missing.
+  // Read from localStorage immediately so fields show DB values on first render
   const [employeeDetails, setEmployeeDetails] = useState<EditableEmployeeDetails>(() => {
     const fromStorage = readProfileFromStorage();
     return {
       employeeId:       fromStorage.employeeId       || sessionUser.employeeId || sessionUser.employeeRecordId || "",
       fullName:         fromStorage.fullName         || sessionUser.fullName         || "",
+      // [FIX 1] Department comes from localStorage (synced from DB via loadDashboard)
+      // No dropdown — shows as plain disabled text so it never gets wiped by a mis-select
       department:       fromStorage.department       || sessionUser.department       || "",
       designation:      fromStorage.designation      || sessionUser.designation      || "",
       reportingManager: fromStorage.reportingManager || sessionUser.reportingManager || "",
@@ -98,7 +87,7 @@ export default function TravelRequestOptionsPage() {
 
   const selectedRequest = REQUEST_OPTIONS.find(o => o.id === selectedOption);
 
-  // onChange kept so TypeScript is satisfied — fields are disabled so it never fires
+  // onChange kept so TypeScript is satisfied — all fields are disabled so it never fires
   const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setEmployeeDetails(prev => ({ ...prev, [name]: value }));
@@ -209,20 +198,21 @@ export default function TravelRequestOptionsPage() {
                   />
                 </label>
 
-                {/* ── DISABLED: Department ── */}
+                {/* ── [FIX 1] Department — plain disabled text input, NOT a dropdown ──
+                    Value comes from localStorage (synced from DB on dashboard load).
+                    Removing the <select> prevents accidental overwrite with empty string
+                    and removes the lag of rendering 20+ options. ── */}
                 <label className={styles.field}>
                   <span className={styles.label}>Department</span>
-                  <select
+                  <input
                     className={styles.input}
                     name="department"
                     value={employeeDetails.department}
                     onChange={handleChange}
+                    placeholder="—"
                     disabled
                     style={disabledFieldStyle}
-                  >
-                    <option value="" disabled>—</option>
-                    {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
-                  </select>
+                  />
                 </label>
 
                 {/* ── DISABLED: Reporting Manager ── */}

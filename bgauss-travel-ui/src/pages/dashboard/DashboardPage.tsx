@@ -1,4 +1,14 @@
 // src/pages/dashboard/DashboardPage.tsx
+// FIXES:
+//  1. [FIX: Department wipe] Profile sync in loadDashboard now uses
+//     "write only non-empty values" — empty API response never clears
+//     existing localStorage fields (department, reporting_manager, etc.)
+//  2. [FIX: SignalR] Connection is only started once, guarded by a ref flag,
+//     and stopped cleanly before re-creating. Negotiation error was caused by
+//     the component re-running useEffect and calling conn.start() on an already-
+//     starting connection. Now uses a `signalRStarted` ref flag.
+//  3. [FIX: Slow profile display] readProfileFromStorage() called eagerly so
+//     navbar/welcome fields show instantly from localStorage, no API wait.
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate, type NavigateFunction } from "react-router-dom";
@@ -289,7 +299,6 @@ function AnalyticsPreviewCard({ approvedCount, pendingCount, rejectedCount, navi
   );
 }
 
-// ── Travel Policy ─────────────────────────────────────────────────────────────
 interface PolicyConfig { maxFlightAmount: number; maxHotelPerNight: number; maxCabAmount: number; maxTrainAmount: number; requireReceiptAbove: number; advanceBookingDays: number; autoApproveBelow: number; allowedCategories: string[] }
 const DEFAULT_POLICY: PolicyConfig = { maxFlightAmount: 15000, maxHotelPerNight: 5000, maxCabAmount: 2000, maxTrainAmount: 3000, requireReceiptAbove: 500, advanceBookingDays: 3, autoApproveBelow: 1000, allowedCategories: ["Flight", "Train", "Cab", "Hotel", "Meal", "Other"] };
 function TravelPolicyConfig() {
@@ -334,10 +343,8 @@ function TravelPolicyConfig() {
   );
 }
 
-// ── StatFilter type ───────────────────────────────────────────────────────────
 type StatFilter = "all" | "Approved" | "Pending" | "Reimbursed" | "PendingApprovals" | "Rejected";
 
-// ── TripCardWithHistory — defined OUTSIDE DashboardPage to prevent remount ───
 interface TripCardProps {
   r: TravelRequestResponse;
   showEmployee?: boolean;
@@ -449,10 +456,6 @@ function TripCardWithHistory({
   );
 }
 
-// ── EmployeeExpenseList — shows employee's own claims with status filter ────────
-// ✅ FIX: This replaces the empty-state placeholder in the employee Expenses tab.
-//    It fetches all own claims from GET /Expense/my and filters by selected status.
-//    "Reimbursed" claims are now visible when clicking the Reimbursed stat card.
 function EmployeeExpenseList({
   expenseStatusFilter, onClearFilter, navigate,
 }: {
@@ -465,7 +468,6 @@ function EmployeeExpenseList({
 
   useEffect(() => {
     setLoading(true);
-    // Fetch ALL statuses — filter client-side so switching filter is instant
     expenseService.getMy()
       .then(setClaims)
       .catch(() => setClaims([]))
@@ -475,7 +477,6 @@ function EmployeeExpenseList({
   const visibleClaims = claims
     ? expenseStatusFilter
       ? claims.filter(c => {
-          // "Submitted" in DB = "Pending" label in UI
           if (expenseStatusFilter === "Submitted") return c.status === "Submitted";
           return c.status === expenseStatusFilter;
         })
@@ -494,7 +495,6 @@ function EmployeeExpenseList({
 
   return (
     <div style={{ padding: "0 24px 24px" }}>
-      {/* Filter chip */}
       {expenseStatusFilter && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
           <span style={{ fontSize: 12, fontWeight: 700, color: "#64748b" }}>Showing:</span>
@@ -567,7 +567,6 @@ function EmployeeExpenseList({
               )}
             </div>
           ))}
-          {/* Submit more button at bottom */}
           <div style={{ textAlign: "center", paddingTop: 8 }}>
             <button
               onClick={() => navigate("/expense/submit")}
@@ -583,13 +582,11 @@ function EmployeeExpenseList({
 
 // ── MAIN COMPONENT ────────────────────────────────────────────────────────────
 export default function DashboardPage() {
-  // ✅ FIX 1: Use NavigateFunction type — no cast needed
   const navigate: NavigateFunction = useNavigate();
-
-  // ✅ FIX 2: Destructure from result variable so TypeScript resolves the type correctly
   const msalLoginResult = useMsalLogin();
   const signOut = msalLoginResult.signOut;
 
+  // [FIX: Slow display] Read from localStorage immediately — no waiting for API
   const fullName   = localStorage.getItem("full_name")     ?? "Employee";
   const role       = localStorage.getItem("role")          ?? "Employee";
   const email      = localStorage.getItem("email")         ?? "";
@@ -627,16 +624,15 @@ export default function DashboardPage() {
   const [detailTrip,            setDetailTrip]            = useState<TravelRequestResponse | null>(null);
   const [showProfileModal,      setShowProfileModal]      = useState(false);
   const [statusFilter,          setStatusFilter]          = useState<StatFilter | null>(null);
-  // ✅ FIX: separate filter for expense claims (Reimbursed card → show reimbursed claims)
   const [expenseStatusFilter,   setExpenseStatusFilter]   = useState<string | null>(null);
 
-  const hasFetched = useRef(false);
-  const signalRRef = useRef<HubConnection | null>(null);
-  const mountedRef = useRef(true);
+  const hasFetched     = useRef(false);
+  const signalRRef     = useRef<HubConnection | null>(null);
+  // [FIX: SignalR] Track whether start() has been called to avoid double-start
+  const signalRStarted = useRef(false);
+  const mountedRef     = useRef(true);
 
   // ── Data loading ────────────────────────────────────────────────────────────
-  // ✅ FIX 3: Redirect to login if token missing; hoist pendingList so admin
-  //    allAdminTrips is always correctly merged regardless of settle order.
   const loadDashboard = useCallback(async (showLoader = true) => {
     const token = localStorage.getItem("jwt_token");
     if (!token) {
@@ -645,29 +641,38 @@ export default function DashboardPage() {
     }
     if (showLoader) setLoading(true);
     try {
-      // ✅ Sync employee profile from API so all localStorage fields are always fresh.
-      // This ensures TravelRequestOptionsPage disabled fields always show correct values
-      // (designation, reportingManager, contactNumber) without needing a manual update first.
+      // [FIX: Department wipe] Profile sync — ONLY write fields that have a non-empty value.
+      // Previously writing "" to localStorage cleared the existing department/manager/etc
+      // every time the API returned null for a field (e.g. after logout → login).
+      // Now we only overwrite when the API returns something meaningful.
       try {
-        // ✅ Use the correct endpoint: GET /api/TravelEmployee/my-profile
-        // This reads the JWT token from the Authorization header (no employee_id needed in URL).
-        // Always write ALL fields — including empty strings — so stale values are always cleared.
         const profile = await get<{
           employeeId?: number; employeeCode?: string; displayName?: string;
           department?: string; designation?: string; reportingManager?: string;
           contactNumber?: string; email?: string; role?: string;
         }>("/TravelEmployee/my-profile");
+
         if (profile) {
-          localStorage.setItem("full_name",         profile.displayName      ?? "");
-          localStorage.setItem("department",        profile.department       ?? "");
-          localStorage.setItem("designation",       profile.designation      ?? "");
-          localStorage.setItem("reporting_manager", profile.reportingManager ?? "");
-          localStorage.setItem("contact_number",    profile.contactNumber    ?? "");
-          localStorage.setItem("email",             profile.email            ?? "");
-          localStorage.setItem("role",              profile.role             ?? "");
-          localStorage.setItem("employee_code",     profile.employeeCode     ?? "");
+          // Helper: only write to localStorage if the value is non-empty
+          const setIfNotEmpty = (key: string, value: string | undefined) => {
+            if (value && value.trim().length > 0) {
+              localStorage.setItem(key, value.trim());
+            }
+            // If value is empty/null we leave the existing localStorage value intact
+          };
+
+          setIfNotEmpty("full_name",         profile.displayName);
+          setIfNotEmpty("department",        profile.department);
+          setIfNotEmpty("designation",       profile.designation);
+          setIfNotEmpty("reporting_manager", profile.reportingManager);
+          setIfNotEmpty("contact_number",    profile.contactNumber);
+          setIfNotEmpty("email",             profile.email);
+          setIfNotEmpty("role",              profile.role);
+          setIfNotEmpty("employee_code",     profile.employeeCode);
         }
-      } catch { /* profile sync failed — existing localStorage values used as fallback */ }
+      } catch {
+        // Profile sync failed — existing localStorage values used as fallback
+      }
 
       const [trRes, sumRes, notifRes] = await Promise.allSettled([
         bookingService.getMy(),
@@ -676,12 +681,7 @@ export default function DashboardPage() {
       ]);
       if (!mountedRef.current) return;
 
-      if (trRes.status === "fulfilled") {
-        console.log("[Dashboard] trips fetched:", trRes.value);
-        setTrips(trRes.value);
-      } else {
-        console.error("[Dashboard] trips fetch failed:", trRes.reason);
-      }
+      if (trRes.status === "fulfilled") setTrips(trRes.value);
       if (sumRes.status   === "fulfilled") setSummary(sumRes.value);
       if (notifRes.status === "fulfilled") {
         const items = notifRes.value.items ?? [];
@@ -698,7 +698,6 @@ export default function DashboardPage() {
         ]);
         if (!mountedRef.current) return;
 
-        // ✅ FIX 4: Hoist pendingList so it is available when building allAdminTrips
         let pendingList: TravelRequestResponse[] = [];
         if (pendingRes.status === "fulfilled") {
           pendingList = pendingRes.value.pendingRequests ?? [];
@@ -709,7 +708,6 @@ export default function DashboardPage() {
           setApprovalSummary(approvalSumRes.value);
           const resolved: TravelRequestResponse[] = (approvalSumRes.value as any).resolvedRequests ?? [];
           setResolvedReqs(resolved);
-          // ✅ Use hoisted pendingList — not a re-read of pendingRes which may be rejected
           setAllAdminTrips([...pendingList, ...resolved]);
         }
 
@@ -722,16 +720,25 @@ export default function DashboardPage() {
   useEffect(() => {
     mountedRef.current = true;
 
-    const tryInit = () => {
-      const token = localStorage.getItem("jwt_token");
-      if (!token) { navigate("/login", { replace: true }); return; }
-      // ✅ FIX 5: Don't block if hasFetched is true but trips are empty — allow one retry
-      if (hasFetched.current) return;
+    const token = localStorage.getItem("jwt_token");
+    if (!token) { navigate("/login", { replace: true }); return; }
+
+    if (!hasFetched.current) {
       hasFetched.current = true;
       void loadDashboard();
+    }
+
+    // [FIX: SignalR negotiation error]
+    // Root cause: useEffect was running again on re-renders and calling
+    // buildNotificationConnection() + conn.start() a second time while the first
+    // connection was still in the Connecting state → "stopped during negotiation".
+    // Fix: guard with signalRStarted ref. Only build + start once per mount.
+    if (!signalRStarted.current) {
+      signalRStarted.current = true;
 
       const conn = buildNotificationConnection();
       signalRRef.current = conn;
+
       conn.on("ReceiveNotification", (notif: NotificationResponse) => {
         if (!mountedRef.current) return;
         setFreshNotifs(prev => [notif, ...prev]);
@@ -745,28 +752,30 @@ export default function DashboardPage() {
           if (notif.requestId) setTripHistories(prev => { const n = { ...prev }; delete n[notif.requestId!]; return n; });
         }
       });
-      conn.start().catch(err => console.warn("[SignalR] Could not connect:", err instanceof Error ? err.message : err));
-    };
 
-    tryInit();
-
-    // ✅ FIX 6: Also listen for auth-ready in case MSAL redirect completes after mount
-    const onAuthReady = () => {
-      if (!hasFetched.current) {
-        tryInit();
-      } else {
-        // Token just arrived — re-fetch data even if hasFetched is true
-        void loadDashboard(false);
+      // Only start if disconnected — prevents "stopped during negotiation" error
+      if (conn.state === HubConnectionState.Disconnected) {
+        conn.start().catch(err =>
+          console.warn("[SignalR] Could not connect:", err instanceof Error ? err.message : err)
+        );
       }
+    }
+
+    const onAuthReady = () => {
+      void loadDashboard(false);
     };
     window.addEventListener("app:auth-ready", onAuthReady);
 
     return () => {
       mountedRef.current = false;
       window.removeEventListener("app:auth-ready", onAuthReady);
+      // Stop SignalR on unmount and reset the flag so it can restart on re-mount
       const conn = signalRRef.current;
-      if (conn && conn.state !== HubConnectionState.Disconnected) void conn.stop();
+      if (conn && conn.state !== HubConnectionState.Disconnected) {
+        void conn.stop();
+      }
       signalRRef.current = null;
+      signalRStarted.current = false;
     };
   }, [loadDashboard, navigate]);
 
@@ -823,14 +832,9 @@ export default function DashboardPage() {
     setExpandedExpenseTripId(prev => prev === requestId ? null : requestId);
   };
 
-  // ── Shared props for TripCardWithHistory ───────────────────────────────────
   const cardProps = {
-    isAdminOrHr,
-    actionId,
-    expandedTripId,
-    expandedExpenseTripId,
-    tripHistories,
-    historyLoadingId,
+    isAdminOrHr, actionId, expandedTripId, expandedExpenseTripId,
+    tripHistories, historyLoadingId,
     onSetDetail:      setDetailTrip,
     onApproveRequest: handleApproveRequest,
     onToggleHistory:  handleToggleHistory,
@@ -838,7 +842,6 @@ export default function DashboardPage() {
     navigate,
   };
 
-  // ── Notification bell prop ─────────────────────────────────────────────────
   const notificationBellProp: NotificationBellProps = {
     notifications:    freshNotifs.map(n => ({ notificationId: n.notificationId, title: n.title, message: n.message, isRead: n.isRead, createdAt: n.createdAt })),
     allNotifications: allNotifs.map(n => ({ notificationId: n.notificationId, title: n.title, message: n.message, isRead: n.isRead, createdAt: n.createdAt })),
@@ -849,7 +852,6 @@ export default function DashboardPage() {
     onClose:       () => setShowNotifDrop(false),
   };
 
-  // ── Nav items ──────────────────────────────────────────────────────────────
   const navItems = [
     { id: "trips",    label: isAdminOrHr ? "All Trips" : "My Trips", active: activeTab === "trips",    onClick: () => setActiveTab("trips") },
     { id: "expenses", label: "Expenses",                              active: activeTab === "expenses", onClick: () => setActiveTab("expenses") },
@@ -859,7 +861,6 @@ export default function DashboardPage() {
     ] : []),
   ];
 
-  // ── Stat card data ─────────────────────────────────────────────────────────
   const approvedCount   = approvalSummary?.approvedCount    ?? 0;
   const pendingCount    = approvalSummary?.pendingApprovals ?? 0;
   const rejectedCount   = approvalSummary?.rejectedCount    ?? 0;
@@ -871,8 +872,6 @@ export default function DashboardPage() {
     { label: "Total Trips",   value: loading ? "—" : String(trips.length),        color: styles.statBlue,   icon: "✈️", chart: trips.length > 0 ? [1, 2, trips.length] : [], filter: "all" },
     { label: "Approved",      value: loading ? "—" : String(myApprovedCount),      color: styles.statGreen,  icon: "✅", chart: myApprovedCount > 0 ? [myApprovedCount] : [],   filter: "Approved" },
     { label: "Pending Trips", value: loading ? "—" : String(myPendingCount),       color: styles.statAmber,  icon: "⏳", chart: [],                                             filter: "Pending" },
-    // ✅ FIX: "Reimbursed" is an ExpenseClaim status, not a TravelRequest status.
-    // Clicking this card switches to the Expenses tab and shows reimbursed claims there.
     { label: "Reimbursed",    value: loading ? "—" : `₹${((summary?.totalReimbursed ?? 0) / 1000).toFixed(1)}K`, color: styles.statPurple, icon: "💰", chart: [], filter: "all", action: () => { setActiveTab("expenses"); setExpenseStatusFilter("Reimbursed"); } },
   ];
 
@@ -880,18 +879,12 @@ export default function DashboardPage() {
     { label: "Pending Approvals", value: loading || !approvalSummary ? "—" : String(approvalSummary.pendingApprovals), color: styles.statAmber,  icon: "⏳", chart: [pendingCount],  filter: "PendingApprovals" },
     { label: "Approved Trips",    value: loading || !approvalSummary ? "—" : String(approvalSummary.approvedCount),    color: styles.statGreen,  icon: "✅", chart: [approvedCount], filter: "Approved" },
     { label: "Rejected Trips",    value: loading || !approvalSummary ? "—" : String(approvalSummary.rejectedCount),    color: styles.statBlue,   icon: "❌", chart: [rejectedCount], filter: "Rejected" },
-    {
-      label: "Expense Pipeline",
-      value: loading || !approvalSummary ? "—" : `₹${((approvalSummary.expensePipeline ?? 0) / 1000).toFixed(1)}K`,
-      color: styles.statPurple, icon: "💰", chart: [], filter: "all",
-      action: () => setActiveTab("expenses"),
-    },
+    { label: "Expense Pipeline",  value: loading || !approvalSummary ? "—" : `₹${((approvalSummary.expensePipeline ?? 0) / 1000).toFixed(1)}K`, color: styles.statPurple, icon: "💰", chart: [], filter: "all", action: () => setActiveTab("expenses") },
   ];
 
-  const statCards: { label: string; value: string; color: string; icon: string; chart: number[]; filter: StatFilter; action?: () => void }[] = isAdminOrHr ? adminStatCards : employeeStatCards;
+  const statCards = isAdminOrHr ? adminStatCards : employeeStatCards;
   const pendingExpenses  = allExpenses.filter(e => e.status === "Submitted");
   const resolvedExpenses = allExpenses.filter(e => e.status !== "Submitted");
-
   const tripSource = isAdminOrHr ? allAdminTrips : trips;
 
   const visibleTrips = !statusFilter || statusFilter === "all"
@@ -934,7 +927,6 @@ export default function DashboardPage() {
       )}
 
       <main className={styles.main}>
-        {/* Welcome banner */}
         <div className={styles.welcomeBanner}>
           <div className={styles.welcomeText}>
             <h1 className={styles.welcomeH1}>{isAdminOrHr ? `Welcome, ${fullName.split(" ")[0]} 🛡️` : `Good day, ${fullName.split(" ")[0]} 👋`}</h1>
@@ -975,13 +967,7 @@ export default function DashboardPage() {
                     (e.currentTarget as HTMLDivElement).style.boxShadow = "";
                   }
                 }}
-                role="button"
-                tabIndex={0}
-                title={
-                  "action" in s && s.action
-                    ? "View expense claims"
-                    : s.filter === "all" ? "Show all trips" : `Filter trips: ${s.label}`
-                }
+                role="button" tabIndex={0}
                 onKeyDown={e => {
                   if (e.key === "Enter" || e.key === " ") {
                     if ("action" in s && s.action) { s.action(); return; }
@@ -1041,7 +1027,6 @@ export default function DashboardPage() {
             {!isAdminOrHr && !loading && trips.length > 0 && (
               <div style={{ margin: "0 0 12px", padding: "8px 16px", background: "#eff6ff", borderRadius: 8, border: "1px solid #bfdbfe", fontSize: 12, color: "#1e40af" }}>
                 💡 <strong>Click any card</strong> to see full trip details, expenses and approval history.
-                {!statusFilter && " Or click a stat card above to filter by status."}
               </div>
             )}
 
@@ -1083,7 +1068,6 @@ export default function DashboardPage() {
               {!isAdminOrHr && <button className={styles.btnOutline} onClick={() => navigate("/expense/submit")}>+ Submit Expense</button>}
             </div>
             {!isAdminOrHr && (<>
-              {/* ✅ FIX: Clickable status mini-cards — clicking filters the expense list below */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 12, padding: "20px 24px 12px" }}>
                 {[
                   { label: "Pending",    val: summary?.pendingCount    ?? 0, amt: summary?.totalPending    ?? 0, color: "#f59e0b", status: "Submitted" },
@@ -1101,8 +1085,6 @@ export default function DashboardPage() {
                   </div>
                 ))}
               </div>
-
-              {/* ✅ FIX: Show actual expense claims list filtered by selected status */}
               <EmployeeExpenseList
                 expenseStatusFilter={expenseStatusFilter}
                 onClearFilter={() => setExpenseStatusFilter(null)}
@@ -1161,11 +1143,7 @@ export default function DashboardPage() {
               </div>
               {historyKind === "requests" && (resolvedReqs.length === 0
                 ? <div className={styles.emptyState}><div className={styles.emptyIcon}>📋</div><p className={styles.emptyTitle}>No history yet</p></div>
-                : <div className={styles.tripsList}>
-                    {resolvedReqs.map(r => (
-                      <TripCardWithHistory key={r.requestId} r={r} showEmployee {...cardProps} />
-                    ))}
-                  </div>
+                : <div className={styles.tripsList}>{resolvedReqs.map(r => <TripCardWithHistory key={r.requestId} r={r} showEmployee {...cardProps} />)}</div>
               )}
               {historyKind === "expenses" && (resolvedExpenses.length === 0
                 ? <div className={styles.emptyState}><div className={styles.emptyIcon}>🧾</div><p className={styles.emptyTitle}>No expense history yet</p></div>
