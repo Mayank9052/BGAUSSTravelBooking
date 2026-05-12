@@ -34,7 +34,7 @@ interface TransportStat  { transport: string; count: number; totalAmount: number
 interface ModeEmployee   { employeeId: number; employeeName: string; employeeCode: string; department: string; requestCode: string; status: string; destination: string; departureDate: string; }
 interface EmployeeStat   { employeeId: number; displayName: string; employeeCode: string; department: string; totalAmount: number; claimCount: number; approved: number; pending: number; }
 interface DepartmentStat { department: string; requestCount: number; expenseTotal: number; approved: number; pending: number; }
-interface ExpenseClaim   { claimId: number; claimCode: string; employeeName: string; category: string; amount: number; currency: string; expenseDate: string; status: string; billPath: string | null; billFileName: string | null; requestCode?: string; description?: string; remarks?: string; }
+interface ExpenseClaim   { claimId: number; claimCode: string; employeeId: number; employeeName: string; category: string; amount: number; currency: string; expenseDate: string; status: string; billPath: string | null; billFileName: string | null; requestCode?: string; description?: string; remarks?: string; }
 interface TravelRequest  { requestId: number; requestCode: string; employeeName: string; employeeCode: string; department: string; destination: string; transportType: string; departureDate: string; returnDate: string; status: string; purpose?: string; remarks?: string; }
 interface ActiveEmployee { employeeId: number; displayName: string; employeeCode: string; department: string; designation: string; email: string; role: string; contactNumber?: string; }
 
@@ -177,8 +177,12 @@ async function fetchExpensesByStatus(status: string, isAdmin: boolean): Promise<
 
 async function fetchEmployeeClaims(employeeId: number): Promise<ExpenseClaim[]> {
   try {
-    const json = await get<unknown>(`/Expense?employeeId=${employeeId}&pageSize=500`);
-    return (Array.isArray(json) ? json : ((json as { items?: unknown[] }).items ?? [])) as ExpenseClaim[];
+    const json = await get<unknown>(`/Expense?pageSize=500`);
+    const all = (Array.isArray(json) ? json : ((json as { items?: unknown[] }).items ?? [])) as ExpenseClaim[];
+    // ── FIX: filter strictly by employeeId client-side ──────────────────────
+    // Backend /Expense?employeeId= may not be supported; filtering here
+    // guarantees only that specific employee's claims appear in the detail panel.
+    return all.filter(c => (c as { employeeId?: number }).employeeId === employeeId);
   } catch { return []; }
 }
 
